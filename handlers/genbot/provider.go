@@ -25,6 +25,9 @@ const (
 const (
 	ProviderGemini   = "gemini"
 	ProviderDeepSeek = "deepseek"
+
+	PayloadFormatGeminiContent   = "gemini-content-v1"
+	PayloadFormatDeepSeekMessage = "deepseek-message-v1"
 )
 
 var ErrDeepSeekVideoOnly = errors.New("当前模型不处理视频")
@@ -37,11 +40,13 @@ type AIUsage struct {
 }
 
 type AIResult struct {
-	Text             string
-	Usage            AIUsage
-	ThoughtSignature string
-	Feedback         string
-	Raw              []byte
+	DisplayText            string
+	AssistantPayload       []byte
+	AssistantPayloadFormat string
+	Usage                  AIUsage
+	ThoughtSignature       string
+	Feedback               string
+	Raw                    []byte
 }
 
 type modelOption struct {
@@ -72,16 +77,24 @@ func providerForModel(model string) string {
 	return ProviderGemini
 }
 
-func generateAI(ctx context.Context, session *GeminiSession, systemPrompt, turnContext string, geminiConfig *genai.GenerateContentConfig) (*AIResult, error) {
+func generateAI(ctx context.Context, session *GeminiSession, systemPrompt string, geminiConfig *genai.GenerateContentConfig) (*AIResult, error) {
 	if session.Provider == ProviderDeepSeek {
-		return generateDeepSeek(ctx, session, systemPrompt, turnContext)
+		return generateDeepSeek(ctx, session, systemPrompt)
 	}
 	geminiConfig.SystemInstruction = genai.NewContentFromText(systemPrompt, genai.RoleModel)
-	response, err := generateGemini(ctx, session, turnContext, geminiConfig)
+	if geminiConfig.ThinkingConfig == nil {
+		geminiConfig.ThinkingConfig = &genai.ThinkingConfig{}
+	}
+	geminiConfig.ThinkingConfig.IncludeThoughts = true
+	response, err := generateGemini(ctx, session, geminiConfig)
 	if err != nil {
 		return nil, err
 	}
-	result := &AIResult{Text: response.Text()}
+	return resultFromGeminiResponse(response)
+}
+
+func resultFromGeminiResponse(response *genai.GenerateContentResponse) (*AIResult, error) {
+	result := &AIResult{}
 	if usage := response.UsageMetadata; usage != nil {
 		result.Usage = AIUsage{
 			InputTokens:       int64(usage.PromptTokenCount),
@@ -91,12 +104,25 @@ func generateAI(ctx context.Context, session *GeminiSession, systemPrompt, turnC
 		}
 	}
 	if len(response.Candidates) > 0 && response.Candidates[0].Content != nil {
-		for _, part := range response.Candidates[0].Content.Parts {
+		content := response.Candidates[0].Content
+		payload, err := json.Marshal(content)
+		if err != nil {
+			return nil, fmt.Errorf("serialize Gemini assistant content: %w", err)
+		}
+		result.AssistantPayload = payload
+		result.AssistantPayloadFormat = PayloadFormatGeminiContent
+		var display strings.Builder
+		for _, part := range content.Parts {
+			if !part.Thought {
+				display.WriteString(part.Text)
+			}
 			if len(part.ThoughtSignature) > 0 {
-				result.ThoughtSignature = base64.StdEncoding.EncodeToString(part.ThoughtSignature)
-				break
+				if result.ThoughtSignature == "" {
+					result.ThoughtSignature = base64.StdEncoding.EncodeToString(part.ThoughtSignature)
+				}
 			}
 		}
+		result.DisplayText = display.String()
 	}
 	if response.PromptFeedback != nil {
 		result.Feedback = string(response.PromptFeedback.BlockReason) + response.PromptFeedback.BlockReasonMessage
@@ -106,8 +132,30 @@ func generateAI(ctx context.Context, session *GeminiSession, systemPrompt, turnC
 }
 
 type deepSeekMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role             string          `json:"role"`
+	Content          string          `json:"content"`
+	ReasoningContent string          `json:"reasoning_content,omitempty"`
+	ToolCalls        json.RawMessage `json:"tool_calls,omitempty"`
+	raw              json.RawMessage
+}
+
+func (m deepSeekMessage) MarshalJSON() ([]byte, error) {
+	if len(m.raw) > 0 {
+		return append([]byte(nil), m.raw...), nil
+	}
+	type wireMessage deepSeekMessage
+	return json.Marshal(wireMessage(m))
+}
+
+func (m *deepSeekMessage) UnmarshalJSON(data []byte) error {
+	type wireMessage deepSeekMessage
+	var decoded wireMessage
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*m = deepSeekMessage(decoded)
+	m.raw = append(m.raw[:0], data...)
+	return nil
 }
 
 type deepSeekRequest struct {
@@ -123,9 +171,7 @@ type deepSeekThinking struct {
 
 type deepSeekResponse struct {
 	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
+		Message deepSeekMessage `json:"message"`
 	} `json:"choices"`
 	Usage struct {
 		PromptTokens          int64 `json:"prompt_tokens"`
@@ -138,17 +184,20 @@ type deepSeekResponse struct {
 	} `json:"usage"`
 }
 
-func generateDeepSeek(ctx context.Context, session *GeminiSession, systemPrompt, turnContext string) (*AIResult, error) {
+func generateDeepSeek(ctx context.Context, session *GeminiSession, systemPrompt string) (*AIResult, error) {
 	cfg := g.GetConfig()
 	if cfg.DeepSeekKey == "" {
 		return nil, errors.New("DeepSeek API Key 未配置")
 	}
-	messages, err := session.ToDeepSeekMessages(systemPrompt, turnContext)
+	messages, err := session.ToDeepSeekMessages(systemPrompt)
 	if err != nil {
 		return nil, err
 	}
 	client := &http.Client{Timeout: 15 * time.Minute}
-	request := deepSeekRequest{Model: session.Model, Messages: messages}
+	request := deepSeekRequest{
+		Model: session.Model, Messages: messages,
+		Thinking: &deepSeekThinking{Type: "enabled"},
+	}
 	var result *AIResult
 	for attempt := 0; attempt < 3; attempt++ {
 		result, err = callDeepSeek(ctx, client, cfg.DeepSeekBaseURL, cfg.DeepSeekKey, request)
@@ -203,8 +252,19 @@ func callDeepSeek(ctx context.Context, client *http.Client, baseURL, apiKey stri
 	if len(decoded.Choices) == 0 {
 		return nil, errors.New("DeepSeek API 没有返回候选结果")
 	}
+	message := decoded.Choices[0].Message
+	if message.Role == "" {
+		message.Role = "assistant"
+		message.raw = nil
+	}
+	assistantPayload, err := message.MarshalJSON()
+	if err != nil {
+		return nil, fmt.Errorf("serialize DeepSeek assistant message: %w", err)
+	}
 	return &AIResult{
-		Text: decoded.Choices[0].Message.Content,
+		DisplayText:            message.Content,
+		AssistantPayload:       assistantPayload,
+		AssistantPayloadFormat: PayloadFormatDeepSeekMessage,
 		Usage: AIUsage{
 			InputTokens:       decoded.Usage.PromptTokens,
 			CachedInputTokens: decoded.Usage.PromptCacheHitTokens,

@@ -1,10 +1,29 @@
 package bili
 
 import (
+	"fmt"
+	"os"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+const biliShortLinkTestEnv = "YTYAN_TEST_BILIBILI_SHORTLINK"
+
+var biliShortLinkTestNotice sync.Once
+
+func requireBilibiliShortLink(t *testing.T) {
+	t.Helper()
+	enabled := os.Getenv(biliShortLinkTestEnv) == "1"
+	biliShortLinkTestNotice.Do(func() {
+		fmt.Printf("external Bilibili short-link tests: set %s=1 to enable redirects (enabled=%t)\n",
+			biliShortLinkTestEnv, enabled)
+	})
+	if !enabled {
+		t.SkipNow()
+	}
+}
 
 var testB23Link = `https://b23.tv/yzzKCJD`
 var testBili2233Link = `https://bili2233.cn/yzzKCJD`
@@ -21,6 +40,7 @@ func TestBvToAv(t *testing.T) {
 }
 
 func TestExtractHttpLink(t *testing.T) {
+	requireBilibiliShortLink(t)
 	as := require.New(t)
 
 	c, err := ConvertBilibiliLinks(testB23Link)
@@ -29,6 +49,7 @@ func TestExtractHttpLink(t *testing.T) {
 }
 
 func TestPure(t *testing.T) {
+	requireBilibiliShortLink(t)
 	as := require.New(t)
 
 	prepare, err := ConvertBilibiliLinks(testB23Link)
@@ -47,6 +68,7 @@ func TestPure(t *testing.T) {
 }
 
 func TestMall(t *testing.T) {
+	requireBilibiliShortLink(t)
 	as := require.New(t)
 	prepare, err := ConvertBilibiliLinks(testMallB23Link)
 	as.NoError(err)
@@ -58,6 +80,7 @@ func TestMall(t *testing.T) {
 }
 
 func TestOneWithComment(t *testing.T) {
+	requireBilibiliShortLink(t)
 	as := require.New(t)
 	text := `this is a comment ` + testB23Link
 	links, err := ConvertBilibiliLinks(text)

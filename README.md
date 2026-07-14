@@ -101,6 +101,18 @@ go test ./...
 
 测试环境会自动使用 `config.example.yaml`，并将 SQLite 数据库初始化为内存库，因此通常不需要手动准备数据库文件。
 
+真实外部 API 测试默认跳过，并在测试进程中各打印一次启用方式：
+
+```sh
+# Gemini 与 DeepSeek API、缓存和工具回放测试
+YTYAN_TEST_AI_API=1 YTYAN_CONFIG_FILE=/path/to/config.yaml go test ./handlers/genbot -run '^TestLive' -v
+
+# Bilibili/b23.tv 短链重定向测试
+YTYAN_TEST_BILIBILI_SHORTLINK=1 go test ./helpers/bili -v
+```
+
+未设置对应变量时，`go test ./...` 不会访问这些真实外部服务；本地 `httptest` 和纯解析测试不受影响。
+
 ## 前端
 
 前端位于 `http/frontend`：

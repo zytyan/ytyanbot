@@ -37,11 +37,19 @@ CREATE TABLE ai_message_meta (
     model TEXT NOT NULL,
     PRIMARY KEY(session_id, msg_id)
 ) WITHOUT ROWID;
+CREATE TABLE gemini_system_prompt (
+    chat_id INTEGER NOT NULL,
+    thread_id INTEGER NOT NULL,
+    prompt TEXT NOT NULL,
+    PRIMARY KEY(chat_id, thread_id)
+) WITHOUT ROWID;
 INSERT INTO gemini_sessions(id) VALUES (7);
 INSERT INTO gemini_contents(session_id, chat_id, msg_id) VALUES (7, -1001, 99);
 INSERT INTO ai_chat_models(chat_id, model) VALUES (-1001, 'old-model');
 INSERT INTO ai_message_meta(session_id, msg_id, provider, model)
-VALUES (7, 99, 'gemini', 'old-model');`)
+VALUES (7, 99, 'gemini', 'old-model');
+INSERT INTO gemini_system_prompt(chat_id, thread_id, prompt)
+VALUES (-1001, 0, 'time=%DATETIME_TZ% sender=%SENDER_NAME% quote=%QUOTE%');`)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, database.Close()) })
 	return database
@@ -62,14 +70,40 @@ func TestAIMetadataMigrationAndUsagePersistence(t *testing.T) {
 	require.NoError(t, database.QueryRow(`SELECT model FROM ai_chat_models WHERE chat_id=-1001`).Scan(&model))
 	require.Equal(t, "old-model", model)
 
-	require.NoError(t, setAIMessageUsage(context.Background(), database, 7, 99, -1001,
-		"deepseek", "deepseek-v4-flash", 27014, 32, 27008))
+	payload := []byte(`{"role":"assistant","reasoning_content":"think","content":"answer"}`)
+	require.NoError(t, UpsertAIMessageResponse(context.Background(), database, 7, 99, -1001,
+		AIMessageUsage{Provider: "deepseek", Model: "deepseek-v4-flash", InputTokens: 27014,
+			OutputTokens: 32, CachedInputTokens: 27008}, "deepseek-message-v1", payload))
 	usage, err := getAIMessageUsage(context.Background(), database, -1001, 99)
 	require.NoError(t, err)
 	require.Equal(t, AIMessageUsage{
 		Provider: "deepseek", Model: "deepseek-v4-flash", InputTokens: 27014,
 		OutputTokens: 32, CachedInputTokens: 27008,
 	}, usage)
+	var payloadFormat string
+	var savedPayload []byte
+	require.NoError(t, database.QueryRow(`SELECT assistant_payload_format, assistant_payload
+FROM ai_message_meta WHERE session_id=7 AND msg_id=99`).Scan(&payloadFormat, &savedPayload))
+	require.Equal(t, "deepseek-message-v1", payloadFormat)
+	require.Equal(t, payload, savedPayload)
+	var migratedPrompt string
+	require.NoError(t, database.QueryRow(`SELECT prompt FROM gemini_system_prompt
+WHERE chat_id=-1001 AND thread_id=0`).Scan(&migratedPrompt))
+	require.NotContains(t, migratedPrompt, "%DATETIME_TZ%")
+	require.NotContains(t, migratedPrompt, "%SENDER_NAME%")
+	require.NotContains(t, migratedPrompt, "%QUOTE%")
+	require.Contains(t, migratedPrompt, "最新用户消息头")
+	require.Contains(t, migratedPrompt, "不可用")
+
+	tx, err := database.BeginTx(context.Background(), nil)
+	require.NoError(t, err)
+	require.NoError(t, UpsertAIMessageResponse(context.Background(), tx, 7, 99, -1001,
+		AIMessageUsage{Provider: "gemini", Model: "temporary", InputTokens: 1},
+		"gemini-content-v1", []byte(`{"role":"model"}`)))
+	require.NoError(t, tx.Rollback())
+	usage, err = getAIMessageUsage(context.Background(), database, -1001, 99)
+	require.NoError(t, err)
+	require.Equal(t, "deepseek-v4-flash", usage.Model)
 }
 
 func TestToggleAIChatUsageConcurrentIsolation(t *testing.T) {

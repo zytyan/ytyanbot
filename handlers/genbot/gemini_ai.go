@@ -80,8 +80,6 @@ func IsGeminiReq(msg *gotgbot.Message) bool {
 	return false
 }
 
-var reLabelHeader = regexp.MustCompile(`(?s)^-start-label-\n.*-end-label-\n`)
-
 //go:embed gemini_sysprompt.txt
 var gDefaultSysPrompt string
 var geminiSysPromptReplacer = NewReplacer(gDefaultSysPrompt)
@@ -146,21 +144,11 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 		sysPromptCtx.Memories = append(sysPromptCtx.Memories, mem.Content)
 	}
 	sysPrompt := getSysPrompt(msg).Replace(&sysPromptCtx)
-	quote := ""
-	if msg.Quote != nil {
-		quote = msg.Quote.Text
-	}
-	turnContext := fmt.Sprintf("当前请求上下文：TIME=%s; DATE=%s; DATETIME=%s; DATETIME_TZ=%s; WEEKDAY=%s; MSG_ID=%d; MSG_DATETIME=%s; SENDER_NAME=%s; SENDER_USERNAME=%s; SENDER_ID=%d; QUOTE=%s",
-		sysPromptCtx.Now.Format("15:04:05"), sysPromptCtx.Now.Format("2006-01-02"), sysPromptCtx.Now.Format("2006-01-02 15:04:05"),
-		sysPromptCtx.Now.Format("2006-01-02 15:04:05 -07:00"), sysPromptCtx.Now.Format("Mon"), msg.MessageId,
-		time.Unix(msg.Date, 0).Format("2006-01-02 15:04:05"), msg.GetSender().Name(), msg.GetSender().Username(), msg.GetSender().Id(), quote)
 	config := &genai.GenerateContentConfig{
 		Tools: []*genai.Tool{
 			{GoogleSearch: &genai.GoogleSearch{}},
 		},
-	}
-	if err := session.AddTgMessage(bot, ctx.EffectiveMessage.ReplyToMessage); err != nil {
-		return err
+		ThinkingConfig: &genai.ThinkingConfig{IncludeThoughts: true},
 	}
 	if err := session.AddTgMessage(bot, ctx.EffectiveMessage); err != nil {
 		return err
@@ -172,7 +160,7 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 
 	actionCancel := h.WithChatAction(bot, "typing", msg.Chat.Id, msg.MessageThreadId, msg.IsTopicMessage)
 	defer actionCancel()
-	res, err := generateAI(genCtx, session, sysPrompt, turnContext, config)
+	res, err := generateAI(genCtx, session, sysPrompt, config)
 	actionCancel()
 	if err != nil {
 		if errors.Is(err, ErrDeepSeekVideoOnly) {
@@ -197,16 +185,14 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 			"cache_hit_rate", float64(res.Usage.CachedInputTokens)/float64(res.Usage.InputTokens),
 			"output_tokens", res.Usage.OutputTokens)
 	}
-	aiText := res.Text
+	aiText := res.DisplayText
 	if aiText == "" {
 		aiText = "模型没有返回任何信息"
 		if res.Feedback != "" {
 			aiText += "，原因: " + res.Feedback
 		}
 		setReaction(bot, msg, "🤯")
-		session.DiscardTmpUpdates()
 	}
-	aiText = reLabelHeader.ReplaceAllString(aiText, "")
 	normTxt, err := mdnormalizer.Normalize(aiText)
 	var respMsg *gotgbot.Message
 	replyOpts := &gotgbot.SendMessageOpts{}
@@ -228,16 +214,14 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 		log.Warn("ai response", "resp", string(res.Raw), "err", err)
 		return err
 	}
-	session.AddModelMessage(respMsg, aiText, res.ThoughtSignature)
+	session.AddModelMessage(respMsg, res)
 	if err = session.PersistTmpUpdates(genCtx); err != nil {
 		return err
 	}
-	return g.SetAIMessageUsage(genCtx, session.ID, respMsg.MessageId, respMsg.Chat.Id,
-		session.Provider, session.Model, res.Usage.InputTokens, res.Usage.OutputTokens,
-		res.Usage.CachedInputTokens)
+	return nil
 }
 
-func generateGemini(ctx context.Context, session *GeminiSession, turnContext string, config *genai.GenerateContentConfig) (res *genai.GenerateContentResponse, err error) {
+func generateGemini(ctx context.Context, session *GeminiSession, config *genai.GenerateContentConfig) (res *genai.GenerateContentResponse, err error) {
 	client := getGenAiClient()
 	base := 3.0
 	jitter := 0.1
@@ -274,7 +258,7 @@ func generateGemini(ctx context.Context, session *GeminiSession, turnContext str
 			err = ctx.Err()
 			break
 		}
-		res, err = client.Models.GenerateContent(ctx, session.Model, session.ToGenaiContents(turnContext), config)
+		res, err = client.Models.GenerateContent(ctx, session.Model, session.ToGenaiContents(), config)
 		if err != nil {
 			wait()
 			continue

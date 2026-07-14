@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS ai_message_meta (
     input_tokens INTEGER NOT NULL DEFAULT 0,
     output_tokens INTEGER NOT NULL DEFAULT 0,
     cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+    assistant_payload BLOB,
+    assistant_payload_format TEXT,
     PRIMARY KEY (session_id, msg_id),
     FOREIGN KEY (session_id, msg_id) REFERENCES gemini_contents(session_id, msg_id) ON DELETE CASCADE
 ) WITHOUT ROWID;
@@ -47,6 +49,8 @@ func initAIMetadataSchema(database *sql.DB) error {
 		{"ai_message_meta", "input_tokens", "INTEGER NOT NULL DEFAULT 0"},
 		{"ai_message_meta", "output_tokens", "INTEGER NOT NULL DEFAULT 0"},
 		{"ai_message_meta", "cached_input_tokens", "INTEGER NOT NULL DEFAULT 0"},
+		{"ai_message_meta", "assistant_payload", "BLOB"},
+		{"ai_message_meta", "assistant_payload_format", "TEXT"},
 	}
 	for _, column := range columns {
 		if err := ensureAIColumn(database, column.table, column.name, column.definition); err != nil {
@@ -60,9 +64,44 @@ SET chat_id = COALESCE((SELECT chat_id FROM gemini_contents
 WHERE chat_id = 0`); err != nil {
 		return err
 	}
+	if err := migrateStableAIPromptVariables(database); err != nil {
+		return err
+	}
 	_, err := database.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_message_meta_chat_msg
 ON ai_message_meta(chat_id, msg_id)`)
 	return err
+}
+
+func migrateStableAIPromptVariables(database *sql.DB) error {
+	var exists bool
+	if err := database.QueryRow(`SELECT EXISTS(
+SELECT 1 FROM sqlite_master WHERE type='table' AND name='gemini_system_prompt')`).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	replacements := [][2]string{
+		{"%TIME%", "见最新用户消息头中的时间（Asia/Shanghai）"},
+		{"%DATE%", "见最新用户消息头中的日期（Asia/Shanghai）"},
+		{"%DATETIME%", "见最新用户消息头中的日期和时间（Asia/Shanghai）"},
+		{"%DATETIME_TZ%", "见最新用户消息头中的日期和时间（Asia/Shanghai）"},
+		{"%WEEKDAY%", "可根据最新用户消息头中的日期推算"},
+		{"%MSG_DATETIME%", "见最新用户消息头中的日期和时间（Asia/Shanghai）"},
+		{"%SENDER_NAME%", "见最新用户消息头中的显示名"},
+		{"%MSG_ID%", "不可用"},
+		{"%SENDER_USERNAME%", "不可用"},
+		{"%SENDER_ID%", "不可用"},
+		{"%QUOTE%", "不可用"},
+	}
+	for _, replacement := range replacements {
+		if _, err := database.Exec(`UPDATE gemini_system_prompt
+SET prompt=replace(prompt, ?, ?) WHERE instr(prompt, ?) > 0`,
+			replacement[0], replacement[1], replacement[0]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ensureAIColumn(database *sql.DB, table, column, definition string) error {
@@ -157,25 +196,65 @@ type AIMessageUsage struct {
 	CachedInputTokens int64
 }
 
+type AIAssistantPayload struct {
+	MsgID    int64
+	Provider string
+	Format   string
+	Payload  []byte
+}
+
+type AIResponseExecutor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
 func SetAIMessageUsage(ctx context.Context, sessionID, msgID, chatID int64, provider, model string,
 	inputTokens, outputTokens, cachedInputTokens int64,
 ) error {
-	return setAIMessageUsage(ctx, db, sessionID, msgID, chatID, provider, model,
-		inputTokens, outputTokens, cachedInputTokens)
+	return UpsertAIMessageResponse(ctx, db, sessionID, msgID, chatID, AIMessageUsage{
+		Provider: provider, Model: model, InputTokens: inputTokens, OutputTokens: outputTokens,
+		CachedInputTokens: cachedInputTokens,
+	}, "", nil)
 }
 
-func setAIMessageUsage(ctx context.Context, database *sql.DB, sessionID, msgID, chatID int64,
-	provider, model string, inputTokens, outputTokens, cachedInputTokens int64,
+func UpsertAIMessageResponse(ctx context.Context, executor AIResponseExecutor, sessionID, msgID, chatID int64,
+	usage AIMessageUsage, payloadFormat string, payload []byte,
 ) error {
-	_, err := database.ExecContext(ctx, `INSERT INTO ai_message_meta(
-session_id, msg_id, chat_id, provider, model, input_tokens, output_tokens, cached_input_tokens)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	var format any
+	if payloadFormat != "" {
+		format = payloadFormat
+	}
+	_, err := executor.ExecContext(ctx, `INSERT INTO ai_message_meta(
+session_id, msg_id, chat_id, provider, model, input_tokens, output_tokens, cached_input_tokens,
+assistant_payload, assistant_payload_format)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id, msg_id) DO UPDATE SET
 chat_id=excluded.chat_id, provider=excluded.provider, model=excluded.model,
 input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens,
-cached_input_tokens=excluded.cached_input_tokens`,
-		sessionID, msgID, chatID, provider, model, inputTokens, outputTokens, cachedInputTokens)
+cached_input_tokens=excluded.cached_input_tokens,
+assistant_payload=COALESCE(excluded.assistant_payload, ai_message_meta.assistant_payload),
+assistant_payload_format=COALESCE(excluded.assistant_payload_format, ai_message_meta.assistant_payload_format)`,
+		sessionID, msgID, chatID, usage.Provider, usage.Model, usage.InputTokens, usage.OutputTokens,
+		usage.CachedInputTokens, payload, format)
 	return err
+}
+
+func GetAISessionAssistantPayloads(ctx context.Context, sessionID int64) (map[int64]AIAssistantPayload, error) {
+	rows, err := db.QueryContext(ctx, `SELECT msg_id, provider, assistant_payload_format, assistant_payload
+FROM ai_message_meta
+WHERE session_id = ? AND assistant_payload IS NOT NULL AND assistant_payload_format IS NOT NULL`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[int64]AIAssistantPayload)
+	for rows.Next() {
+		var item AIAssistantPayload
+		if err = rows.Scan(&item.MsgID, &item.Provider, &item.Format, &item.Payload); err != nil {
+			return nil, err
+		}
+		result[item.MsgID] = item
+	}
+	return result, rows.Err()
 }
 
 func GetAIMessageUsage(ctx context.Context, chatID, msgID int64) (usage AIMessageUsage, err error) {

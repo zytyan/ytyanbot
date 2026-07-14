@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	g "main/globalcfg"
 	"main/globalcfg/h"
 	"main/globalcfg/q"
@@ -20,16 +22,29 @@ import (
 
 type GeminiSession struct {
 	q.GeminiSession
-	mu          sync.Mutex
-	Contents    []q.GeminiContent
-	TmpContents []q.GeminiContent
-	UpdateTime  time.Time
-	Memories    []q.GeminiMemory
+	mu                sync.Mutex
+	Contents          []q.GeminiContent
+	TmpContents       []q.GeminiContent
+	UpdateTime        time.Time
+	Memories          []q.GeminiMemory
+	AssistantPayloads map[int64]g.AIAssistantPayload
+	PendingResponses  map[int64]pendingAssistantResponse
 
 	AllowCodeExecution bool
 	Provider           string
 	Model              string
 }
+
+type pendingAssistantResponse struct {
+	ChatID        int64
+	Provider      string
+	Model         string
+	Usage         AIUsage
+	Payload       []byte
+	PayloadFormat string
+}
+
+var shanghaiLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
 
 var geminiSessions = struct {
 	mu sync.RWMutex
@@ -41,37 +56,48 @@ var geminiSessions = struct {
 	chatIdToSess: map[geminiTopic]*GeminiSession{},
 }
 
-func databaseContentToGenaiPart(content *q.GeminiContent) (out *genai.Content) {
-	out = &genai.Content{}
-	label := fmt.Sprintf(`-start-label-
-id:%d
-time:%s
-name:%s
-type:%s
-`, content.MsgID, content.SentTime.Format("2006-01-02 15:04:05"),
-		content.Username,
-		content.MsgType)
-	if content.ReplyToMsgID.Valid {
-		label += fmt.Sprintf("reply:%d\n", content.ReplyToMsgID.Int64)
-	}
-	if content.QuotePart.Valid {
-		label += fmt.Sprintf("quote:%s\n", content.QuotePart.String)
-	}
-	label += "-end-label-\n"
-	out.Role = content.Role
-	textPart := &genai.Part{
-		Text: label,
-	}
-	out.Parts = append(out.Parts, textPart)
+func compactUserText(content *q.GeminiContent) string {
+	header := fmt.Sprintf("[ %s %s ]\n", content.Username,
+		content.SentTime.In(shanghaiLocation).Format("2006-01-02 15:04:05"))
 	if content.Text.Valid {
-		part := &genai.Part{Text: content.Text.String}
-		if content.ThoughtSignature.Valid {
-			part.ThoughtSignature, _ = base64.StdEncoding.DecodeString(content.ThoughtSignature.String)
-		}
-		out.Parts = append(out.Parts, part)
-	} else if content.ThoughtSignature.Valid {
-		textPart.ThoughtSignature, _ = base64.StdEncoding.DecodeString(content.ThoughtSignature.String)
+		return header + content.Text.String
 	}
+	return header
+}
+
+func warnInvalidAssistantPayload(provider string, msgID int64, err error) {
+	logger := log
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Warn("invalid assistant payload; falling back to saved text",
+		"provider", provider, "msg_id", msgID, "err", err)
+}
+
+func fallbackGeminiAssistant(content *q.GeminiContent) *genai.Content {
+	part := &genai.Part{}
+	if content.Text.Valid {
+		part.Text = content.Text.String
+	}
+	if content.ThoughtSignature.Valid {
+		part.ThoughtSignature, _ = base64.StdEncoding.DecodeString(content.ThoughtSignature.String)
+	}
+	return &genai.Content{Role: genai.RoleModel, Parts: []*genai.Part{part}}
+}
+
+func databaseContentToGenaiPart(content *q.GeminiContent, payloads map[int64]g.AIAssistantPayload) (out *genai.Content) {
+	if content.Role == genai.RoleModel {
+		if payload, ok := payloads[content.MsgID]; ok && payload.Provider == ProviderGemini && payload.Format == PayloadFormatGeminiContent {
+			var saved genai.Content
+			if err := json.Unmarshal(payload.Payload, &saved); err == nil {
+				return &saved
+			} else {
+				warnInvalidAssistantPayload(ProviderGemini, content.MsgID, err)
+			}
+		}
+		return fallbackGeminiAssistant(content)
+	}
+	out = &genai.Content{Role: content.Role, Parts: []*genai.Part{{Text: compactUserText(content)}}}
 	if len(content.Blob) > 0 && content.MimeType.Valid {
 		out.Parts = append(out.Parts, &genai.Part{InlineData: &genai.Blob{
 			Data:     content.Blob,
@@ -81,43 +107,53 @@ type:%s
 	return
 }
 
-func (s *GeminiSession) ToGenaiContents(turnContext string) []*genai.Content {
-	contents := make([]*genai.Content, 0, len(s.Contents)+len(s.TmpContents)+1)
+func (s *GeminiSession) ToGenaiContents() []*genai.Content {
+	contents := make([]*genai.Content, 0, len(s.Contents)+len(s.TmpContents))
 	for i := range s.Contents {
-		contents = append(contents, databaseContentToGenaiPart(&s.Contents[i]))
-	}
-	if turnContext != "" {
-		contents = append(contents, genai.NewContentFromText(turnContext, genai.RoleUser))
+		contents = append(contents, databaseContentToGenaiPart(&s.Contents[i], s.AssistantPayloads))
 	}
 	for i := range s.TmpContents {
-		contents = append(contents, databaseContentToGenaiPart(&s.TmpContents[i]))
+		contents = append(contents, databaseContentToGenaiPart(&s.TmpContents[i], s.AssistantPayloads))
 	}
 	return contents
 }
 
-func deepSeekContent(content *q.GeminiContent) (deepSeekMessage, bool) {
-	role := "user"
+func deepSeekContent(content *q.GeminiContent, payloads map[int64]g.AIAssistantPayload) (deepSeekMessage, bool) {
 	if content.Role == genai.RoleModel {
-		role = "assistant"
+		if payload, ok := payloads[content.MsgID]; ok && payload.Provider == ProviderDeepSeek && payload.Format == PayloadFormatDeepSeekMessage {
+			var saved deepSeekMessage
+			if err := json.Unmarshal(payload.Payload, &saved); err == nil && saved.Role == "assistant" {
+				return saved, true
+			} else {
+				if err == nil {
+					err = fmt.Errorf("unexpected role %q", saved.Role)
+				}
+				warnInvalidAssistantPayload(ProviderDeepSeek, content.MsgID, err)
+			}
+		}
+		message := deepSeekMessage{Role: "assistant"}
+		if content.Text.Valid {
+			message.Content = content.Text.String
+		}
+		return message, true
 	}
 	if content.MsgType == "video" && !content.Text.Valid {
 		return deepSeekMessage{}, false
 	}
-	var text strings.Builder
-	_, _ = fmt.Fprintf(&text, "-start-label-\nid:%d\ntime:%s\nname:%s\ntype:%s\n-end-label-\n",
-		content.MsgID, content.SentTime.Format("2006-01-02 15:04:05"), content.Username, content.MsgType)
-	if content.Text.Valid {
-		text.WriteString(content.Text.String)
-	}
+	text := strings.Builder{}
+	text.WriteString(compactUserText(content))
 	if content.MsgType == "photo" {
-		text.WriteString("\n[图片]")
+		if content.Text.Valid && content.Text.String != "" {
+			text.WriteByte('\n')
+		}
+		text.WriteString("[图片]")
 	} else if content.MsgType == "sticker" && !content.Text.Valid {
 		text.WriteString("[贴纸]")
 	}
-	return deepSeekMessage{Role: role, Content: text.String()}, true
+	return deepSeekMessage{Role: "user", Content: text.String()}, true
 }
 
-func (s *GeminiSession) ToDeepSeekMessages(systemPrompt, turnContext string) ([]deepSeekMessage, error) {
+func (s *GeminiSession) ToDeepSeekMessages(systemPrompt string) ([]deepSeekMessage, error) {
 	if len(s.TmpContents) > 0 {
 		last := s.TmpContents[len(s.TmpContents)-1]
 		if last.MsgType == "video" && !last.Text.Valid {
@@ -126,15 +162,12 @@ func (s *GeminiSession) ToDeepSeekMessages(systemPrompt, turnContext string) ([]
 	}
 	messages := []deepSeekMessage{{Role: "system", Content: systemPrompt}}
 	for i := range s.Contents {
-		if message, ok := deepSeekContent(&s.Contents[i]); ok {
+		if message, ok := deepSeekContent(&s.Contents[i], s.AssistantPayloads); ok {
 			messages = append(messages, message)
 		}
 	}
-	if turnContext != "" {
-		messages = append(messages, deepSeekMessage{Role: "user", Content: turnContext})
-	}
 	for i := range s.TmpContents {
-		if message, ok := deepSeekContent(&s.TmpContents[i]); ok {
+		if message, ok := deepSeekContent(&s.TmpContents[i], s.AssistantPayloads); ok {
 			messages = append(messages, message)
 		}
 	}
@@ -169,13 +202,6 @@ func (s *GeminiSession) AddTgMessage(bot *gotgbot.Bot, msg *gotgbot.Message) (er
 		Username:       msg.GetSender().Name(),
 		AtableUsername: sql.NullString{String: username, Valid: username != ""},
 		UserID:         msg.GetSender().Id(),
-	}
-	if msg.ReplyToMessage != nil {
-		content.ReplyToMsgID.Valid = true
-		content.ReplyToMsgID.Int64 = msg.ReplyToMessage.MessageId
-		if msg.Quote != nil && msg.Quote.IsManual {
-			content.QuotePart = sql.NullString{String: msg.Quote.Text, Valid: true}
-		}
 	}
 	mdTxt := ent2md.TgMsgTextToMarkdown(msg)
 	if mdTxt != "" {
@@ -251,7 +277,7 @@ func (s *GeminiSession) AddTgMessage(bot *gotgbot.Bot, msg *gotgbot.Message) (er
 	return
 }
 
-func (s *GeminiSession) AddModelMessage(msg *gotgbot.Message, text, thoughtSignature string) {
+func (s *GeminiSession) AddModelMessage(msg *gotgbot.Message, result *AIResult) {
 	content := q.GeminiContent{
 		SessionID: s.ID,
 		ChatID:    msg.Chat.Id,
@@ -260,16 +286,23 @@ func (s *GeminiSession) AddModelMessage(msg *gotgbot.Message, text, thoughtSigna
 		SentTime:  q.UnixTime{Time: time.Unix(msg.Date, 0)},
 		Username:  mainBot.FirstName,
 		MsgType:   "text",
-		Text:      sql.NullString{String: text, Valid: text != ""},
+		Text:      sql.NullString{String: result.DisplayText, Valid: result.DisplayText != ""},
 		UserID:    mainBot.Id,
 	}
 	if mainBot.Username != "" {
 		content.AtableUsername = sql.NullString{String: mainBot.Username, Valid: true}
 	}
-	if thoughtSignature != "" {
-		content.ThoughtSignature = sql.NullString{String: thoughtSignature, Valid: true}
+	if result.ThoughtSignature != "" {
+		content.ThoughtSignature = sql.NullString{String: result.ThoughtSignature, Valid: true}
 	}
 	s.TmpContents = append(s.TmpContents, content)
+	if s.PendingResponses == nil {
+		s.PendingResponses = make(map[int64]pendingAssistantResponse)
+	}
+	s.PendingResponses[msg.MessageId] = pendingAssistantResponse{
+		ChatID: msg.Chat.Id, Provider: s.Provider, Model: s.Model, Usage: result.Usage,
+		Payload: result.AssistantPayload, PayloadFormat: result.AssistantPayloadFormat,
+	}
 }
 
 func (s *GeminiSession) loadContentFromDatabase(ctx context.Context) error {
@@ -284,6 +317,10 @@ func (s *GeminiSession) loadContentFromDatabase(ctx context.Context) error {
 		}
 	}
 	s.Contents = content
+	s.AssistantPayloads, err = g.GetAISessionAssistantPayloads(ctx, s.ID)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -321,14 +358,38 @@ func (s *GeminiSession) PersistTmpUpdates(ctx context.Context) error {
 			return err
 		}
 	}
+	for msgID, response := range s.PendingResponses {
+		err = g.UpsertAIMessageResponse(ctx, tx, s.ID, msgID, response.ChatID, g.AIMessageUsage{
+			Provider: response.Provider, Model: response.Model,
+			InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens,
+			CachedInputTokens: response.Usage.CachedInputTokens,
+		}, response.PayloadFormat, response.Payload)
+		if err != nil {
+			return err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
 	s.Contents = append(s.Contents, s.TmpContents...)
+	if s.AssistantPayloads == nil {
+		s.AssistantPayloads = make(map[int64]g.AIAssistantPayload)
+	}
+	for msgID, response := range s.PendingResponses {
+		s.AssistantPayloads[msgID] = g.AIAssistantPayload{
+			MsgID: msgID, Provider: response.Provider, Format: response.PayloadFormat,
+			Payload: append([]byte(nil), response.Payload...),
+		}
+	}
 	s.TmpContents = nil
+	s.PendingResponses = nil
 	s.UpdateTime = time.Now()
-	return tx.Commit()
+	return nil
 }
 
 func (s *GeminiSession) DiscardTmpUpdates() {
 	s.TmpContents = nil
+	s.PendingResponses = nil
 }
 
 func GeminiGetSession(ctx context.Context, msg *gotgbot.Message, createNewSession bool, ignoreSessionTimeout bool, mentionSessionId int64) *GeminiSession {

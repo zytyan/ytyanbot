@@ -15,6 +15,7 @@ import (
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/genai"
 )
 
 func testContent(msgType, text string) q.GeminiContent {
@@ -30,18 +31,22 @@ func testContent(msgType, text string) q.GeminiContent {
 }
 
 func TestDeepSeekMediaConversion(t *testing.T) {
-	photo, ok := deepSeekContent(ptr(testContent("photo", "caption")))
+	photo, ok := deepSeekContent(ptr(testContent("photo", "caption")), nil)
 	require.True(t, ok)
-	require.Contains(t, photo.Content, "caption")
-	require.Contains(t, photo.Content, "[图片]")
+	require.Equal(t, "[ tester 1970-01-01 08:02:03 ]\ncaption\n[图片]", photo.Content)
+	require.NotContains(t, photo.Content, "-start-label-")
+	require.NotContains(t, photo.Content, "id:")
+	require.NotContains(t, photo.Content, "type:")
+	require.NotContains(t, photo.Content, "reply:")
+	require.NotContains(t, photo.Content, "quote:")
 
-	sticker, ok := deepSeekContent(ptr(testContent("sticker", "🙂")))
+	sticker, ok := deepSeekContent(ptr(testContent("sticker", "🙂")), nil)
 	require.True(t, ok)
 	require.Contains(t, sticker.Content, "🙂")
 
-	_, ok = deepSeekContent(ptr(testContent("video", "")))
+	_, ok = deepSeekContent(ptr(testContent("video", "")), nil)
 	require.False(t, ok)
-	videoCaption, ok := deepSeekContent(ptr(testContent("video", "only caption")))
+	videoCaption, ok := deepSeekContent(ptr(testContent("video", "only caption")), nil)
 	require.True(t, ok)
 	require.Contains(t, videoCaption.Content, "only caption")
 	require.NotContains(t, videoCaption.Content, "[视频]")
@@ -49,7 +54,7 @@ func TestDeepSeekMediaConversion(t *testing.T) {
 
 func TestDeepSeekPureVideoRejected(t *testing.T) {
 	session := &GeminiSession{TmpContents: []q.GeminiContent{testContent("video", "")}}
-	_, err := session.ToDeepSeekMessages("system", "turn")
+	_, err := session.ToDeepSeekMessages("system")
 	require.ErrorIs(t, err, ErrDeepSeekVideoOnly)
 }
 
@@ -61,7 +66,7 @@ func TestCallDeepSeek(t *testing.T) {
 			StatusCode: http.StatusOK,
 			Header:     make(http.Header),
 			Body: io.NopCloser(strings.NewReader(
-				`{"choices":[{"message":{"content":"ok"}}],"usage":{"prompt_tokens":20,"prompt_cache_hit_tokens":12,"prompt_cache_miss_tokens":8,"completion_tokens":3,"completion_tokens_details":{"reasoning_tokens":1}}}`)),
+				`{"choices":[{"message":{"role":"assistant","reasoning_content":"thinking","content":"ok","tool_calls":[{"id":"call-1","type":"function"}],"future_field":{"x":1}}}],"usage":{"prompt_tokens":20,"prompt_cache_hit_tokens":12,"prompt_cache_miss_tokens":8,"completion_tokens":3,"completion_tokens_details":{"reasoning_tokens":1}}}`)),
 		}, nil
 	})}
 
@@ -69,9 +74,24 @@ func TestCallDeepSeek(t *testing.T) {
 		Model: ModelDeepSeekFlash, Messages: []deepSeekMessage{{Role: "user", Content: "hello"}},
 	})
 	require.NoError(t, err)
-	require.Equal(t, "ok", result.Text)
+	require.Equal(t, "ok", result.DisplayText)
 	require.Equal(t, int64(12), result.Usage.CachedInputTokens)
 	require.Equal(t, int64(1), result.Usage.ThinkingTokens)
+	require.Equal(t, PayloadFormatDeepSeekMessage, result.AssistantPayloadFormat)
+	var assistant deepSeekMessage
+	require.NoError(t, json.Unmarshal(result.AssistantPayload, &assistant))
+	require.Equal(t, "thinking", assistant.ReasoningContent)
+	require.JSONEq(t, `[{"id":"call-1","type":"function"}]`, string(assistant.ToolCalls))
+	require.Contains(t, string(result.AssistantPayload), `"future_field":{"x":1}`)
+
+	replayed, ok := deepSeekContent(&q.GeminiContent{MsgID: 8, Role: "model"}, map[int64]g.AIAssistantPayload{
+		8: {MsgID: 8, Provider: ProviderDeepSeek, Format: result.AssistantPayloadFormat, Payload: result.AssistantPayload},
+	})
+	require.True(t, ok)
+	require.Equal(t, assistant, replayed)
+	replayedJSON, err := json.Marshal(replayed)
+	require.NoError(t, err)
+	require.Contains(t, string(replayedJSON), `"future_field":{"x":1}`)
 }
 
 func TestCallDeepSeekErrorDoesNotExposeKey(t *testing.T) {
@@ -88,7 +108,7 @@ func TestCallDeepSeekErrorDoesNotExposeKey(t *testing.T) {
 	require.NotContains(t, err.Error(), "secret-value")
 }
 
-func TestStablePromptKeepsDynamicPlaceholder(t *testing.T) {
+func TestStablePromptReplacesDeprecatedDynamicVariables(t *testing.T) {
 	r := NewReplacer("time=%DATETIME_TZ% chat=%CHAT_NAME% quote=%QUOTE%")
 	ctx := &ReplaceCtx{
 		Stable: true,
@@ -97,9 +117,165 @@ func TestStablePromptKeepsDynamicPlaceholder(t *testing.T) {
 		Msg:    &gotgbot.Message{Chat: gotgbot.Chat{Title: "group"}},
 	}
 	got := r.Replace(ctx)
-	require.Contains(t, got, "%DATETIME_TZ%")
-	require.Contains(t, got, "%QUOTE%")
+	require.Contains(t, got, "最新用户消息头")
+	require.Contains(t, got, "不可用")
 	require.Contains(t, got, "group")
+}
+
+func TestGeminiCompactPartsAndRawAssistantReplay(t *testing.T) {
+	photo := testContent("photo", "caption")
+	photo.Blob = []byte("image")
+	photo.MimeType = sql.NullString{String: "image/jpeg", Valid: true}
+	converted := databaseContentToGenaiPart(&photo, nil)
+	require.Equal(t, "user", converted.Role)
+	require.Len(t, converted.Parts, 2)
+	require.Equal(t, "[ tester 1970-01-01 08:02:03 ]\ncaption", converted.Parts[0].Text)
+	require.Equal(t, []byte("image"), converted.Parts[1].InlineData.Data)
+
+	rawContent := &genai.Content{Role: genai.RoleModel, Parts: []*genai.Part{
+		{Text: "private thought", Thought: true, ThoughtSignature: []byte("sig-1")},
+		{ExecutableCode: &genai.ExecutableCode{Code: "print(1)", Language: genai.LanguagePython}},
+		{Text: "final answer", ThoughtSignature: []byte("sig-2")},
+	}}
+	result, err := resultFromGeminiResponse(&genai.GenerateContentResponse{
+		Candidates: []*genai.Candidate{{Content: rawContent}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "final answer", result.DisplayText)
+	require.NotContains(t, result.DisplayText, "private thought")
+	require.Equal(t, PayloadFormatGeminiContent, result.AssistantPayloadFormat)
+
+	var saved genai.Content
+	require.NoError(t, json.Unmarshal(result.AssistantPayload, &saved))
+	require.Equal(t, rawContent, &saved)
+
+	modelRecord := q.GeminiContent{MsgID: 9, Role: genai.RoleModel,
+		Text: sql.NullString{String: "fallback", Valid: true}}
+	session := &GeminiSession{
+		Contents: []q.GeminiContent{photo, modelRecord},
+		AssistantPayloads: map[int64]g.AIAssistantPayload{
+			9: {MsgID: 9, Provider: ProviderGemini, Format: PayloadFormatGeminiContent, Payload: result.AssistantPayload},
+		},
+		TmpContents: []q.GeminiContent{testContent("text", "next turn")},
+	}
+	contents := session.ToGenaiContents()
+	require.Len(t, contents, 3)
+	require.Equal(t, rawContent, contents[1])
+	require.Equal(t, "[ tester 1970-01-01 08:02:03 ]\nnext turn", contents[2].Parts[0].Text)
+
+	prefixSession := &GeminiSession{
+		Contents: session.Contents, AssistantPayloads: session.AssistantPayloads,
+	}
+	prefix := prefixSession.ToGenaiContents()
+	require.Equal(t, prefix, contents[:len(prefix)])
+}
+
+func TestDamagedAssistantPayloadFallsBackToSavedBody(t *testing.T) {
+	record := q.GeminiContent{MsgID: 11, Role: genai.RoleModel,
+		Text: sql.NullString{String: "safe fallback", Valid: true}}
+	payloads := map[int64]g.AIAssistantPayload{
+		11: {MsgID: 11, Provider: ProviderGemini, Format: PayloadFormatGeminiContent, Payload: []byte("not-json")},
+	}
+	geminiMessage := databaseContentToGenaiPart(&record, payloads)
+	require.Equal(t, "safe fallback", geminiMessage.Parts[0].Text)
+
+	payloads[11] = g.AIAssistantPayload{MsgID: 11, Provider: ProviderDeepSeek,
+		Format: PayloadFormatDeepSeekMessage, Payload: []byte("not-json")}
+	deepSeekMessage, ok := deepSeekContent(&record, payloads)
+	require.True(t, ok)
+	require.Equal(t, "safe fallback", deepSeekMessage.Content)
+}
+
+func TestAddTgMessageDoesNotPersistReplyMetadata(t *testing.T) {
+	previousBot := mainBot
+	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot"}}
+	t.Cleanup(func() { mainBot = previousBot })
+	user := &gotgbot.User{Id: 42, FirstName: "Alice", Username: "alice"}
+	message := &gotgbot.Message{
+		MessageId: 101,
+		Date:      123,
+		Chat:      gotgbot.Chat{Id: -1001, Type: "supergroup"},
+		From:      user,
+		Text:      "hello",
+		ReplyToMessage: &gotgbot.Message{
+			MessageId: 88,
+			From:      &gotgbot.User{Id: 7, FirstName: "Bob"},
+		},
+		Quote: &gotgbot.TextQuote{Text: "quoted", IsManual: true},
+	}
+	session := &GeminiSession{GeminiSession: q.GeminiSession{ID: 5}}
+	require.NoError(t, session.AddTgMessage(nil, message))
+	require.Len(t, session.TmpContents, 1)
+	saved := session.TmpContents[0]
+	require.False(t, saved.ReplyToMsgID.Valid)
+	require.False(t, saved.QuotePart.Valid)
+	require.Equal(t, int64(42), saved.UserID)
+	require.Equal(t, "alice", saved.AtableUsername.String)
+}
+
+func TestPersistTmpUpdatesStoresBodyPayloadAndUsageAtomically(t *testing.T) {
+	ctx := context.Background()
+	dbSession, err := g.Q.CreateNewGeminiSession(ctx, -900001, "transaction test", "private")
+	require.NoError(t, err)
+	previousBot := mainBot
+	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot", Username: "testbot"}}
+	t.Cleanup(func() { mainBot = previousBot })
+
+	userContent := testContent("text", "hello")
+	userContent.SessionID = dbSession.ID
+	userContent.ChatID = -900001
+	userContent.MsgID = 5001
+	session := &GeminiSession{
+		GeminiSession: dbSession,
+		Provider:      ProviderDeepSeek,
+		Model:         ModelDeepSeekFlash,
+		TmpContents:   []q.GeminiContent{userContent},
+	}
+	result := &AIResult{
+		DisplayText:            "answer",
+		AssistantPayload:       []byte(`{"role":"assistant","reasoning_content":"think","content":"answer"}`),
+		AssistantPayloadFormat: PayloadFormatDeepSeekMessage,
+		Usage:                  AIUsage{InputTokens: 100, OutputTokens: 20, CachedInputTokens: 80},
+	}
+	session.AddModelMessage(&gotgbot.Message{
+		MessageId: 5002, Date: 123, Chat: gotgbot.Chat{Id: -900001, Type: "private"},
+	}, result)
+	require.NoError(t, session.PersistTmpUpdates(ctx))
+	require.Empty(t, session.TmpContents)
+	require.Empty(t, session.PendingResponses)
+
+	savedContents, err := g.Q.GetAllMsgInSession(ctx, dbSession.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, savedContents, 2)
+	require.Equal(t, "answer", savedContents[1].Text.String)
+	payloads, err := g.GetAISessionAssistantPayloads(ctx, dbSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, result.AssistantPayload, payloads[5002].Payload)
+	usage, err := g.GetAIMessageUsage(ctx, -900001, 5002)
+	require.NoError(t, err)
+	require.Equal(t, int64(80), usage.CachedInputTokens)
+
+	failedDBSession, err := g.Q.CreateNewGeminiSession(ctx, -900002, "rollback test", "private")
+	require.NoError(t, err)
+	duplicate := testContent("text", "duplicate")
+	duplicate.SessionID = failedDBSession.ID
+	duplicate.ChatID = -900002
+	duplicate.MsgID = 6001
+	failed := &GeminiSession{
+		GeminiSession: failedDBSession,
+		Provider:      ProviderDeepSeek,
+		Model:         ModelDeepSeekFlash,
+		TmpContents:   []q.GeminiContent{duplicate, duplicate},
+	}
+	failed.AddModelMessage(&gotgbot.Message{
+		MessageId: 6002, Date: 123, Chat: gotgbot.Chat{Id: -900002, Type: "private"},
+	}, result)
+	require.Error(t, failed.PersistTmpUpdates(ctx))
+	rolledBack, err := g.Q.GetAllMsgInSession(ctx, failedDBSession.ID, 10)
+	require.NoError(t, err)
+	require.Empty(t, rolledBack)
+	_, err = g.GetAIMessageUsage(ctx, -900002, 6002)
+	require.ErrorIs(t, err, sql.ErrNoRows)
 }
 
 func ptr[T any](value T) *T { return &value }

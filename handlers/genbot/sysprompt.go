@@ -19,17 +19,17 @@ func UpdateGeminiSysPrompt(bot *gotgbot.Bot, ctx *ext.Context) error {
 			_, err := msg.Reply(bot, `没有找到任何System prompt，请使用 /sysprompt 提示词或使用该命令回复其他消息设置提示词。
 您需要使用 /get_sysprompt 获取当前系统提示词， /reset_sysprompt 恢复默认系统提示词。
 
-你可以通过 %VAR% 使用变量，它会自动替换变量名，可使用的变量如下。
-TIME: 当前时间，不包含日期
-DATE: 当前日期，不含时间
-DATETIME: 当前时间和日期
-DATETIME_TZ: 包含时区的时间和日期
+你可以通过 %VAR% 使用稳定变量。为提高缓存命中率，逐轮变化的信息只出现在最新用户消息的「[ 显示名 时间 ]」消息头中。
 CHAT_NAME: 当前聊天的名称
+CHAT_ID: 当前聊天 ID
 BOT_NAME: Bot的名字
 BOT_USERNAME: Bot的username
 CHAT_TYPE: 聊天类型(group, private)
+MEMORIES: 当前聊天的长期记忆
 
-例：现在是%DATETIME%，当前聊天为%CHAT_NAME%，请根据需要解答群友的问题。
+旧的 TIME、DATE、DATETIME、DATETIME_TZ、WEEKDAY、MSG_DATETIME、SENDER_NAME 会替换为指向最新消息头的稳定说明；MSG_ID、SENDER_USERNAME、SENDER_ID、QUOTE 会显示为“不可用”。
+
+例：当前聊天为%CHAT_NAME%，请结合最新用户消息头中的发送者和时间解答问题。
 `, nil)
 			return err
 		}

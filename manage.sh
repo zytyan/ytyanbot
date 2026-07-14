@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -e
 
-SERVICE_NAME=goytyan
+SERVICE_NAME=ytyanbot
 BUILD_DIR=build
 EXEC_NAME=ytyan-go
 USER=tgbotapi
 GROUP=tgbots
 SYSTEMD_FILE="/etc/systemd/system/$SERVICE_NAME.service"
+SYSTEMD_TEMPLATE="$(cd "$(dirname "$0")" && pwd)/ytyanbot.service"
 
 function build() {
     local auto_restart=0
@@ -64,31 +65,8 @@ function install() {
     echo "Setting ownership of $BUILD_DIR to $USER:$GROUP"
     sudo chown -R "$USER:$GROUP" "$BUILD_DIR"
 
-    echo "Writing service file to $SYSTEMD_FILE"
-    sudo tee "$SYSTEMD_FILE" >/dev/null <<EOF
-[Unit]
-Description=Ytyan main bot
-After=network.target telegram-bot-api.service
-StartLimitIntervalSec=60
-StartLimitBurst=5
-
-[Service]
-Restart=on-failure
-RestartSec=5s
-Type=simple
-Environment="GOYTYAN_NO_STDOUT=1"
-Environment="GOYTYAN_CONFIG=config.yaml"
-Environment="GOYTYAN_LOG_FILE=logs/log.log"
-Environment="TZ=Asia/Shanghai"
-KillSignal=SIGINT
-WorkingDirectory=$(pwd)/$BUILD_DIR
-ExecStart=$(pwd)/$BUILD_DIR/$EXEC_NAME
-User=$USER
-Group=$GROUP
-
-[Install]
-WantedBy=multi-user.target
-EOF
+    echo "Installing service file from $SYSTEMD_TEMPLATE to $SYSTEMD_FILE"
+    sudo install -m 0644 "$SYSTEMD_TEMPLATE" "$SYSTEMD_FILE"
 
     sudo systemctl daemon-reload
     sudo systemctl enable "$SERVICE_NAME"

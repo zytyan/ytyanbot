@@ -56,6 +56,9 @@ type Config struct {
 	LogLevel           int8        `koanf:"log-level"`
 	DatabasePath       string      `koanf:"database-path"`
 	GeminiKey          string      `koanf:"gemini-key"`
+	DeepSeekKey        string      `koanf:"deepseek-key"`
+	DeepSeekBaseURL    string      `koanf:"deepseek-base-url"`
+	BackendAddr        string      `koanf:"backend-addr"`
 	MsgDbPath          string      `koanf:"msg-db-path"`
 	MeiliWalDbPath     string      `koanf:"meili-wal-db-path"`
 	MeiliWalBatchSize  int         `koanf:"meili-wal-batch-size"`
@@ -67,6 +70,8 @@ type Config struct {
 const (
 	DefaultMeiliWalDbPath    = "meili-wal.db"
 	DefaultMeiliWalBatchSize = 500
+	DefaultDeepSeekBaseURL   = "https://api.deepseek.com"
+	DefaultBackendAddr       = "127.0.0.1:4021"
 )
 
 var gMu sync.Mutex
@@ -172,11 +177,29 @@ func loadConfig(k *koanf.Koanf, provider *file.File) (*Config, error) {
 }
 
 func normalizeConfig(cfg *Config) {
+	if value := os.Getenv("YTYAN_BOT_TOKEN"); value != "" {
+		cfg.BotToken = value
+	}
+	if value := os.Getenv("GEMINI_API_KEY"); value != "" {
+		cfg.GeminiKey = value
+	}
+	if value := os.Getenv("DEEPSEEK_API_KEY"); value != "" {
+		cfg.DeepSeekKey = value
+	}
+	if value := os.Getenv("YTYAN_BACKEND_ADDR"); value != "" {
+		cfg.BackendAddr = value
+	}
 	if cfg.MeiliWalDbPath == "" {
 		cfg.MeiliWalDbPath = DefaultMeiliWalDbPath
 	}
 	if cfg.MeiliWalBatchSize <= 0 {
 		cfg.MeiliWalBatchSize = DefaultMeiliWalBatchSize
+	}
+	if cfg.DeepSeekBaseURL == "" {
+		cfg.DeepSeekBaseURL = DefaultDeepSeekBaseURL
+	}
+	if cfg.BackendAddr == "" {
+		cfg.BackendAddr = DefaultBackendAddr
 	}
 }
 
@@ -235,10 +258,13 @@ func InitConfig() {
 	if err := InitMeiliWalDbSchema(meiliWalDb); err != nil {
 		panic(err)
 	}
-	if testing.Testing() {
+	if testing.Testing() && config.Load().DatabasePath == ":memory:" {
 		initMainDatabaseInMemory(db)
 		_ = msgDb.Close()
 		msgDb = db
+	}
+	if err := initAIMetadataSchema(db); err != nil {
+		panic(err)
 	}
 	Q, err = q.PrepareWithLogger(context.Background(), db, nil)
 	if err != nil {

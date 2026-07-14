@@ -20,6 +20,9 @@ save-message: true
 tg-api-url: http://localhost:8081
 drop-pending-updates: false
 gemini-key: ABCDEFGHIJKLMNOPQRST
+deepseek-key: ""
+deepseek-base-url: https://api.deepseek.com
+backend-addr: 127.0.0.1:4021
 
 meili-config:
   base-url: http://localhost:7700

@@ -16,6 +16,14 @@ type ReplaceCtx struct {
 	Msg *gotgbot.Message
 
 	Memories []string
+	Stable   bool
+}
+
+func dynamicValue(ctx *ReplaceCtx, name, value string) string {
+	if ctx.Stable {
+		return "%" + name + "%"
+	}
+	return value
 }
 
 func getChatName(chat gotgbot.Chat) string {
@@ -35,19 +43,19 @@ var replaceMetaVar = map[string]func(ctx *ReplaceCtx) string{
 	// 使用 %VAR% 替换
 	//%TIME% => 15:04:05，下同
 	"TIME": func(ctx *ReplaceCtx) string {
-		return ctx.Now.Format("15:04:05")
+		return dynamicValue(ctx, "TIME", ctx.Now.Format("15:04:05"))
 	},
 	"DATE": func(ctx *ReplaceCtx) string {
-		return ctx.Now.Format("2006-01-02")
+		return dynamicValue(ctx, "DATE", ctx.Now.Format("2006-01-02"))
 	},
 	"DATETIME": func(ctx *ReplaceCtx) string {
-		return ctx.Now.Format("2006-01-02 15:04:05")
+		return dynamicValue(ctx, "DATETIME", ctx.Now.Format("2006-01-02 15:04:05"))
 	},
 	"DATETIME_TZ": func(ctx *ReplaceCtx) string {
-		return ctx.Now.Format("2006-01-02 15:04:05 -07:00")
+		return dynamicValue(ctx, "DATETIME_TZ", ctx.Now.Format("2006-01-02 15:04:05 -07:00"))
 	},
 	"WEEKDAY": func(ctx *ReplaceCtx) string {
-		return ctx.Now.Format("Mon")
+		return dynamicValue(ctx, "WEEKDAY", ctx.Now.Format("Mon"))
 	},
 	"CHAT_NAME": func(ctx *ReplaceCtx) string {
 		chat := ctx.Msg.GetChat()
@@ -69,24 +77,27 @@ var replaceMetaVar = map[string]func(ctx *ReplaceCtx) string{
 		return ctx.Msg.Chat.Type
 	},
 	"MSG_ID": func(ctx *ReplaceCtx) string {
-		return strconv.FormatInt(ctx.Msg.MessageId, 10)
+		return dynamicValue(ctx, "MSG_ID", strconv.FormatInt(ctx.Msg.MessageId, 10))
 	},
 	"CHAT_ID": func(ctx *ReplaceCtx) string {
 		return strconv.FormatInt(ctx.Msg.Chat.Id, 10)
 	},
 	"SENDER_NAME": func(ctx *ReplaceCtx) string {
-		return ctx.Msg.GetSender().Name()
+		return dynamicValue(ctx, "SENDER_NAME", ctx.Msg.GetSender().Name())
 	},
 	"SENDER_USERNAME": func(ctx *ReplaceCtx) string {
-		return ctx.Msg.GetSender().Username()
+		return dynamicValue(ctx, "SENDER_USERNAME", ctx.Msg.GetSender().Username())
 	},
 	"SENDER_ID": func(ctx *ReplaceCtx) string {
-		return strconv.FormatInt(ctx.Msg.GetSender().Id(), 10)
+		return dynamicValue(ctx, "SENDER_ID", strconv.FormatInt(ctx.Msg.GetSender().Id(), 10))
 	},
 	"MSG_DATETIME": func(ctx *ReplaceCtx) string {
-		return time.Unix(ctx.Msg.Date, 0).Format("2006-01-02 15:04:05")
+		return dynamicValue(ctx, "MSG_DATETIME", time.Unix(ctx.Msg.Date, 0).Format("2006-01-02 15:04:05"))
 	},
 	"QUOTE": func(ctx *ReplaceCtx) string {
+		if ctx.Stable {
+			return "%QUOTE%"
+		}
 		if ctx.Msg.Quote == nil {
 			return ""
 		}

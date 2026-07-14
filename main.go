@@ -203,7 +203,7 @@ func main() {
 	b := newBot(token)
 	hdrs.SetMainBot(b)
 	hdrs.StartChatStatScheduler()
-	backend.GoListenAndServe("127.0.0.1:4021", b)
+	backend.GoListenAndServe(g.GetConfig().BackendAddr, b)
 	go hdrs.HttpListen4019()
 	dp := GroupedDispatcher{Dispatcher: ext.NewDispatcher(&ext.DispatcherOpts{
 		Error: func(b *gotgbot.Bot, ctx *ext.Context, err error) ext.DispatcherAction {
@@ -260,6 +260,8 @@ func main() {
 	dp.Command("get_memories", genbot.GetMemories)
 	dp.Command("session_help", genbot.SessionHelp)
 	dp.Command("change_model", genbot.ChangeGeminiModel)
+	dp.Command("model", genbot.ChangeGeminiModel)
+	dp.Command("show_usage", genbot.ToggleShowUsage)
 	dp.NewMessage(hdrs.BiliMsgFilter, hdrs.BiliMsgConverter)
 	dp.NewMessage(hdrs.DetectNsfwPhoto, hdrs.NsfwDetect)
 	dp.NewMessage(hdrs.NeedSolve, hdrs.SolveMath)
@@ -279,6 +281,8 @@ func main() {
 	dp.NewCallback(hdrs.IsNsfwPicRateBtn, hdrs.RateNsfwPicByBtn)
 	dp.NewCallback(hdrs.IsDelMsgCallback, hdrs.DelMessage)
 	dp.NewCallback(callbackquery.Prefix(hdrs.GroupConfigModifyPrefix), hdrs.ModifyGroupConfigByButton)
+	dp.NewCallback(genbot.IsModelCallback, genbot.ChangeModelByButton)
+	dp.NewCallback(genbot.IsUsageCallback, genbot.ShowUsageByButton)
 
 	err := updater.StartPolling(b, &ext.PollingOpts{
 		DropPendingUpdates:    g.GetConfig().DropPendingUpdates,

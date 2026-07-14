@@ -23,8 +23,10 @@ INSERT INTO gemini_contents (session_id,
                              blob,
                              mime_type,
                              quote_part,
-                             thought_signature)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             thought_signature,
+                             atable_username,
+                             user_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type AddGeminiMessageParams struct {
@@ -41,6 +43,8 @@ type AddGeminiMessageParams struct {
 	MimeType         sql.NullString `json:"mime_type"`
 	QuotePart        sql.NullString `json:"quote_part"`
 	ThoughtSignature sql.NullString `json:"thought_signature"`
+	AtableUsername   sql.NullString `json:"atable_username"`
+	UserID           int64          `json:"user_id"`
 }
 
 func (q *Queries) AddGeminiMessage(ctx context.Context, arg AddGeminiMessageParams) error {
@@ -58,6 +62,8 @@ func (q *Queries) AddGeminiMessage(ctx context.Context, arg AddGeminiMessagePara
 		arg.MimeType,
 		arg.QuotePart,
 		arg.ThoughtSignature,
+		arg.AtableUsername,
+		arg.UserID,
 	)
 	return err
 }

@@ -1,0 +1,20 @@
+[Unit]
+Description=Ytyan main bot
+After=network.target telegram-bot-api.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Restart=always
+RestartSec=5s
+Type=simple
+Environment="YTYAN_CONFIG_FILE=/opt/tgbots/ytyanbot/build/config.yaml"
+Environment="TZ=Asia/Shanghai"
+KillSignal=SIGINT
+WorkingDirectory=/opt/tgbots/ytyanbot/build
+ExecStart=/opt/tgbots/ytyanbot/build/ytyan-go
+User=tgbotapi
+Group=tgbots
+
+[Install]
+WantedBy=multi-user.target

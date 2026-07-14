@@ -3,6 +3,7 @@ package genbot
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"log/slog"
 	g "main/globalcfg"
@@ -46,11 +47,9 @@ func getGenAiClient() *genai.Client {
 }
 
 const (
-	geminiSessionContentLimit = 150
+	geminiSessionContentLimit = 500
 	geminiMemoriesLimit       = 60
 )
-
-var geminiModel = "gemini-3-flash-preview"
 
 type geminiTopic struct {
 	chatId  int64
@@ -138,16 +137,24 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 	setReaction(bot, msg, "👀")
 
 	sysPromptCtx := ReplaceCtx{
-		Bot: bot,
-		Msg: ctx.EffectiveMessage,
-		Now: time.Now(),
+		Bot:    bot,
+		Msg:    ctx.EffectiveMessage,
+		Now:    time.Now(),
+		Stable: true,
 	}
 	for _, mem := range session.Memories {
 		sysPromptCtx.Memories = append(sysPromptCtx.Memories, mem.Content)
 	}
 	sysPrompt := getSysPrompt(msg).Replace(&sysPromptCtx)
+	quote := ""
+	if msg.Quote != nil {
+		quote = msg.Quote.Text
+	}
+	turnContext := fmt.Sprintf("当前请求上下文：TIME=%s; DATE=%s; DATETIME=%s; DATETIME_TZ=%s; WEEKDAY=%s; MSG_ID=%d; MSG_DATETIME=%s; SENDER_NAME=%s; SENDER_USERNAME=%s; SENDER_ID=%d; QUOTE=%s",
+		sysPromptCtx.Now.Format("15:04:05"), sysPromptCtx.Now.Format("2006-01-02"), sysPromptCtx.Now.Format("2006-01-02 15:04:05"),
+		sysPromptCtx.Now.Format("2006-01-02 15:04:05 -07:00"), sysPromptCtx.Now.Format("Mon"), msg.MessageId,
+		time.Unix(msg.Date, 0).Format("2006-01-02 15:04:05"), msg.GetSender().Name(), msg.GetSender().Username(), msg.GetSender().Id(), quote)
 	config := &genai.GenerateContentConfig{
-		SystemInstruction: genai.NewContentFromText(sysPrompt, genai.RoleModel),
 		Tools: []*genai.Tool{
 			{GoogleSearch: &genai.GoogleSearch{}},
 		},
@@ -165,24 +172,36 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 
 	actionCancel := h.WithChatAction(bot, "typing", msg.Chat.Id, msg.MessageThreadId, msg.IsTopicMessage)
 	defer actionCancel()
-	res, err := generate(genCtx, session, config)
+	res, err := generateAI(genCtx, session, sysPrompt, turnContext, config)
 	actionCancel()
 	if err != nil {
+		if errors.Is(err, ErrDeepSeekVideoOnly) {
+			setReaction(bot, msg, "🤔")
+			_, replyErr := ctx.EffectiveMessage.Reply(bot, err.Error(), nil)
+			return replyErr
+		}
 		setReaction(bot, msg, "😭")
 		_, _ = ctx.EffectiveMessage.Reply(bot, fmt.Sprintf("error:%s", err), nil)
 		return err
 	}
 	_ = g.Q.IncrementSessionTokenCounters(
 		genCtx,
-		int64(res.UsageMetadata.PromptTokenCount),
-		int64(res.UsageMetadata.CandidatesTokenCount+res.UsageMetadata.ThoughtsTokenCount),
+		res.Usage.InputTokens,
+		res.Usage.OutputTokens,
 		session.ID,
 	)
-	aiText := res.Text()
+	_ = g.IncrementAICachedTokens(genCtx, session.ID, res.Usage.CachedInputTokens)
+	if res.Usage.InputTokens > 0 {
+		log.Info("ai usage", "provider", session.Provider, "model", session.Model,
+			"input_tokens", res.Usage.InputTokens, "cached_input_tokens", res.Usage.CachedInputTokens,
+			"cache_hit_rate", float64(res.Usage.CachedInputTokens)/float64(res.Usage.InputTokens),
+			"output_tokens", res.Usage.OutputTokens)
+	}
+	aiText := res.Text
 	if aiText == "" {
 		aiText = "模型没有返回任何信息"
-		if res.PromptFeedback != nil {
-			aiText += "，原因: " + string(res.PromptFeedback.BlockReason) + res.PromptFeedback.BlockReasonMessage
+		if res.Feedback != "" {
+			aiText += "，原因: " + res.Feedback
 		}
 		setReaction(bot, msg, "🤯")
 		session.DiscardTmpUpdates()
@@ -190,25 +209,35 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 	aiText = reLabelHeader.ReplaceAllString(aiText, "")
 	normTxt, err := mdnormalizer.Normalize(aiText)
 	var respMsg *gotgbot.Message
+	replyOpts := &gotgbot.SendMessageOpts{}
+	showUsage, usageErr := g.GetAIChatUsageEnabled(genCtx, msg.Chat.Id)
+	if usageErr != nil {
+		return usageErr
+	}
+	if showUsage {
+		replyOpts.ReplyMarkup = usageKeyboard()
+	}
 	if err != nil {
-		respMsg, err = ctx.EffectiveMessage.Reply(bot, aiText, nil)
+		respMsg, err = ctx.EffectiveMessage.Reply(bot, aiText, replyOpts)
 		log.Warn("parse markdown failed", "err", err)
 	} else {
-		respMsg, err = ctx.EffectiveMessage.Reply(bot, normTxt.Text, &gotgbot.SendMessageOpts{Entities: normTxt.Entities})
+		replyOpts.Entities = normTxt.Entities
+		respMsg, err = ctx.EffectiveMessage.Reply(bot, normTxt.Text, replyOpts)
 	}
 	if err != nil {
-		j, _ := res.MarshalJSON()
-		log.Warn("gemini response", "resp", string(j), "err", err)
+		log.Warn("ai response", "resp", string(res.Raw), "err", err)
 		return err
 	}
-	err = session.AddTgMessage(bot, respMsg)
-	if err != nil {
+	session.AddModelMessage(respMsg, aiText, res.ThoughtSignature)
+	if err = session.PersistTmpUpdates(genCtx); err != nil {
 		return err
 	}
-	return session.PersistTmpUpdates(genCtx)
+	return g.SetAIMessageUsage(genCtx, session.ID, respMsg.MessageId, respMsg.Chat.Id,
+		session.Provider, session.Model, res.Usage.InputTokens, res.Usage.OutputTokens,
+		res.Usage.CachedInputTokens)
 }
 
-func generate(ctx context.Context, session *GeminiSession, config *genai.GenerateContentConfig) (res *genai.GenerateContentResponse, err error) {
+func generateGemini(ctx context.Context, session *GeminiSession, turnContext string, config *genai.GenerateContentConfig) (res *genai.GenerateContentResponse, err error) {
 	client := getGenAiClient()
 	base := 3.0
 	jitter := 0.1
@@ -245,7 +274,7 @@ func generate(ctx context.Context, session *GeminiSession, config *genai.Generat
 			err = ctx.Err()
 			break
 		}
-		res, err = client.Models.GenerateContent(ctx, geminiModel, session.ToGenaiContents(), config)
+		res, err = client.Models.GenerateContent(ctx, session.Model, session.ToGenaiContents(turnContext), config)
 		if err != nil {
 			wait()
 			continue
@@ -266,17 +295,4 @@ func generate(ctx context.Context, session *GeminiSession, config *genai.Generat
 func Init(bot *gotgbot.Bot, logger *slog.Logger) {
 	mainBot = bot
 	log = logger
-}
-
-func ChangeGeminiModel(bot *gotgbot.Bot, ctx *ext.Context) error {
-	const flashLite = "gemini-3.1-flash-lite-preview"
-	const flash = "gemini-3-flash-preview"
-	oldModel := geminiModel
-	if geminiModel == flashLite {
-		geminiModel = flash
-	} else {
-		geminiModel = flashLite
-	}
-	_, err := ctx.EffectiveMessage.Reply(bot, fmt.Sprintf("model: %s => %s", oldModel, geminiModel), nil)
-	return err
 }

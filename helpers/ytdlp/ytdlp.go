@@ -141,7 +141,7 @@ func getFirstFile(path string) (string, error) {
 			return err
 		}
 
-		if !d.IsDir() && isVideoFile(d.Name()){
+		if !d.IsDir() && isVideoFile(d.Name()) {
 			file = path
 			return filepath.SkipAll
 		}
@@ -242,7 +242,7 @@ func (c *Req) runWithCtxBBDown(ctx context.Context) (resp *Resp, err error) {
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, "/usr/local/bin/dotnet-tools/BBDown", c.Url, "-e", "hevc,av1,avc", "-q", "720P 高清", "-F", fmt.Sprintf("%s/<bvid>", tmp))
+	cmd := exec.CommandContext(ctx, "/usr/local/bin/dotnet-tools/BBDown", c.Url, "-app", "-e", "hevc,av1,avc", "-q", "720P 高清", "-F", fmt.Sprintf("%s/<bvid>", tmp))
 	outBuf := new(bytes.Buffer)
 	errBuf := new(bytes.Buffer)
 	cmd.Stdout = outBuf

@@ -9,7 +9,7 @@
 - 视频与音频下载：支持 B 站链接识别/转换、B 站视频下载，以及 YouTube 视频/音频下载。
 - 图片处理：Azure OCR、成人内容检测、WebP 转 PNG、生成 prpr 和萨卡班甲鱼表情。
 - 小工具命令：计算器、汇率换算、好好说话、roll 点、COC/DND 骰子与战斗辅助。
-- Gemini 对话：支持会话、系统提示词、模型切换和记忆相关命令。
+- AI 对话：支持 Gemini/DeepSeek、会话、系统提示词、群级模型切换、单次 Token 用量和记忆相关命令。
 - HTTP 搜索后端：内置 Gin 后端，供前端或 Telegram WebApp 调用搜索、用户信息和头像接口。
 - Svelte 前端：`http/frontend` 下提供搜索页面和 OpenAPI 类型封装。
 
@@ -20,7 +20,7 @@
 ├── main.go                 # Telegram bot 入口，注册命令、消息处理器和 HTTP 服务
 ├── config.example.yaml     # 配置样例，测试环境也会读取它
 ├── handlers/               # Bot 命令、消息、回调处理逻辑
-├── handlers/genbot/        # Gemini 对话与系统提示词相关逻辑
+├── handlers/genbot/        # Gemini/DeepSeek 对话、模型和用量相关逻辑
 ├── helpers/                # OCR、MeiliSearch、Bili、图片、数学表达式等辅助模块
 ├── globalcfg/              # 配置、日志、SQLite 连接和 sqlc 查询封装
 ├── sql/                    # SQLite schema/query 与 sqlc 插件
@@ -38,7 +38,7 @@
 - 可选：MeiliSearch，用于消息搜索
 - 可选：本地 Telegram Bot API 服务，配置项为 `tg-api-url`
 - 可选：Azure OCR / Content Moderator，用于图片 OCR 和 NSFW 检测
-- 可选：Gemini API Key，用于 AI 对话
+- 可选：Gemini 和 DeepSeek API Key，用于 AI 对话
 - 前端开发需要 Node.js 与 npm
 
 ## 配置
@@ -69,7 +69,12 @@ YTYAN_CONFIG_FILE=/path/to/config.yaml go run .
 - `meili-config`：MeiliSearch 地址、索引名、主键和 master key。
 - `ocr` / `content-moderator`：Azure 服务配置。
 - `gemini-key`：Gemini API Key。
+- `deepseek-key`：DeepSeek API Key；也可通过 `DEEPSEEK_API_KEY` 环境变量提供。
+- `deepseek-base-url`：DeepSeek API 地址，默认 `https://api.deepseek.com`。
+- `backend-addr`：内置 HTTP 后端监听地址，默认 `127.0.0.1:4021`。
 - `drop-pending-updates`：启动时是否丢弃 Telegram 未处理更新。
+
+AI 聊天可使用 `/change_model`（或 `/model`）切换当前聊天模型，使用 `/show_usage` 开关每条 AI 回复下方的 Token 用量按钮。群聊中这些配置仅允许群主、管理员或 `god` 修改。
 
 注意：`config.example.yaml` 中的 token 和 key 仅用于示例/测试占位，实际部署时请使用自己的密钥，并避免提交真实配置。
 
@@ -134,7 +139,7 @@ npm run dev
 ./manage.sh log -f
 ```
 
-脚本会将产物构建到 `build/ytyan-go`，并可安装名为 `goytyan` 的 systemd 服务。正式部署前请确认 `build/config.yaml`、数据库路径、日志路径和运行用户权限符合服务器环境。
+脚本会将产物构建到 `build/ytyan-go`，并使用仓库中的 `ytyanbot.service` 模板安装同名 systemd 服务。正式部署前请确认 `build/config.yaml`、数据库路径、日志路径和运行用户权限符合服务器环境。
 
 ## 数据库与代码生成
 

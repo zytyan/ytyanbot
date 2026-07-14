@@ -3,6 +3,7 @@ package genbot
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	g "main/globalcfg"
@@ -26,6 +27,8 @@ type GeminiSession struct {
 	Memories    []q.GeminiMemory
 
 	AllowCodeExecution bool
+	Provider           string
+	Model              string
 }
 
 var geminiSessions = struct {
@@ -61,7 +64,13 @@ type:%s
 	}
 	out.Parts = append(out.Parts, textPart)
 	if content.Text.Valid {
-		out.Parts = append(out.Parts, &genai.Part{Text: content.Text.String})
+		part := &genai.Part{Text: content.Text.String}
+		if content.ThoughtSignature.Valid {
+			part.ThoughtSignature, _ = base64.StdEncoding.DecodeString(content.ThoughtSignature.String)
+		}
+		out.Parts = append(out.Parts, part)
+	} else if content.ThoughtSignature.Valid {
+		textPart.ThoughtSignature, _ = base64.StdEncoding.DecodeString(content.ThoughtSignature.String)
 	}
 	if len(content.Blob) > 0 && content.MimeType.Valid {
 		out.Parts = append(out.Parts, &genai.Part{InlineData: &genai.Blob{
@@ -72,15 +81,64 @@ type:%s
 	return
 }
 
-func (s *GeminiSession) ToGenaiContents() []*genai.Content {
-	contents := make([]*genai.Content, 0, len(s.Contents)+1)
+func (s *GeminiSession) ToGenaiContents(turnContext string) []*genai.Content {
+	contents := make([]*genai.Content, 0, len(s.Contents)+len(s.TmpContents)+1)
 	for i := range s.Contents {
 		contents = append(contents, databaseContentToGenaiPart(&s.Contents[i]))
+	}
+	if turnContext != "" {
+		contents = append(contents, genai.NewContentFromText(turnContext, genai.RoleUser))
 	}
 	for i := range s.TmpContents {
 		contents = append(contents, databaseContentToGenaiPart(&s.TmpContents[i]))
 	}
 	return contents
+}
+
+func deepSeekContent(content *q.GeminiContent) (deepSeekMessage, bool) {
+	role := "user"
+	if content.Role == genai.RoleModel {
+		role = "assistant"
+	}
+	if content.MsgType == "video" && !content.Text.Valid {
+		return deepSeekMessage{}, false
+	}
+	var text strings.Builder
+	_, _ = fmt.Fprintf(&text, "-start-label-\nid:%d\ntime:%s\nname:%s\ntype:%s\n-end-label-\n",
+		content.MsgID, content.SentTime.Format("2006-01-02 15:04:05"), content.Username, content.MsgType)
+	if content.Text.Valid {
+		text.WriteString(content.Text.String)
+	}
+	if content.MsgType == "photo" {
+		text.WriteString("\n[图片]")
+	} else if content.MsgType == "sticker" && !content.Text.Valid {
+		text.WriteString("[贴纸]")
+	}
+	return deepSeekMessage{Role: role, Content: text.String()}, true
+}
+
+func (s *GeminiSession) ToDeepSeekMessages(systemPrompt, turnContext string) ([]deepSeekMessage, error) {
+	if len(s.TmpContents) > 0 {
+		last := s.TmpContents[len(s.TmpContents)-1]
+		if last.MsgType == "video" && !last.Text.Valid {
+			return nil, ErrDeepSeekVideoOnly
+		}
+	}
+	messages := []deepSeekMessage{{Role: "system", Content: systemPrompt}}
+	for i := range s.Contents {
+		if message, ok := deepSeekContent(&s.Contents[i]); ok {
+			messages = append(messages, message)
+		}
+	}
+	if turnContext != "" {
+		messages = append(messages, deepSeekMessage{Role: "user", Content: turnContext})
+	}
+	for i := range s.TmpContents {
+		if message, ok := deepSeekContent(&s.TmpContents[i]); ok {
+			messages = append(messages, message)
+		}
+	}
+	return messages, nil
 }
 
 func (s *GeminiSession) AddTgMessage(bot *gotgbot.Bot, msg *gotgbot.Message) (err error) {
@@ -136,23 +194,31 @@ func (s *GeminiSession) AddTgMessage(bot *gotgbot.Bot, msg *gotgbot.Message) (er
 		content.MimeType.Valid = true
 		content.MimeType.String = "image/jpeg"
 	} else if msg.Sticker != nil {
-		if msg.Sticker.IsAnimated {
-			return errors.New("不支持的动画类型")
-		}
-		data, err = h.DownloadToMemoryCached(bot, msg.Sticker.FileId)
-		if err != nil {
-			return err
-		}
-		content.Blob = data
 		content.MsgType = "sticker"
-		content.MimeType.Valid = true
-		if msg.Sticker.IsVideo {
-			s.AllowCodeExecution = false
-			content.MimeType.String = "video/webm"
-		} else {
-			content.MimeType.String = "image/webp"
+		content.Text = sql.NullString{String: msg.Sticker.Emoji, Valid: msg.Sticker.Emoji != ""}
+		if !content.Text.Valid {
+			content.Text = sql.NullString{String: "[贴纸]", Valid: true}
+		}
+		if !msg.Sticker.IsAnimated && s.Provider != ProviderDeepSeek {
+			data, err = h.DownloadToMemoryCached(bot, msg.Sticker.FileId)
+			if err != nil {
+				return err
+			}
+			content.Blob = data
+			content.MimeType.Valid = true
+			if msg.Sticker.IsVideo {
+				s.AllowCodeExecution = false
+				content.MimeType.String = "video/webm"
+			} else {
+				content.MimeType.String = "image/webp"
+			}
 		}
 	} else if msg.Video != nil {
+		content.MsgType = "video"
+		if s.Provider == ProviderDeepSeek {
+			s.TmpContents = append(s.TmpContents, content)
+			return nil
+		}
 		if msg.Video.Duration <= 240 && msg.Video.FileSize <= 15*1024*1024 {
 			s.AllowCodeExecution = false
 			data, err = h.DownloadToMemoryCached(bot, msg.Video.FileId)
@@ -160,7 +226,6 @@ func (s *GeminiSession) AddTgMessage(bot *gotgbot.Bot, msg *gotgbot.Message) (er
 				return err
 			}
 			content.Blob = data
-			content.MsgType = "video"
 			content.MimeType.Valid = true
 			content.MimeType.String = "video/mp4"
 		} else {
@@ -168,18 +233,43 @@ func (s *GeminiSession) AddTgMessage(bot *gotgbot.Bot, msg *gotgbot.Message) (er
 			content.Text.String += "(用户发送了一个视频，但由于不满足 size<15MB且时长<=240s，无法上传)"
 		}
 	} else if msg.Animation != nil {
+		content.MsgType = "video"
+		if s.Provider == ProviderDeepSeek {
+			s.TmpContents = append(s.TmpContents, content)
+			return nil
+		}
 		s.AllowCodeExecution = false
 		data, err = h.DownloadToMemoryCached(bot, msg.Animation.FileId)
 		if err != nil {
 			return err
 		}
 		content.Blob = data
-		content.MsgType = "video"
 		content.MimeType.Valid = true
 		content.MimeType.String = "video/mp4"
 	}
 	s.TmpContents = append(s.TmpContents, content)
 	return
+}
+
+func (s *GeminiSession) AddModelMessage(msg *gotgbot.Message, text, thoughtSignature string) {
+	content := q.GeminiContent{
+		SessionID: s.ID,
+		ChatID:    msg.Chat.Id,
+		MsgID:     msg.MessageId,
+		Role:      genai.RoleModel,
+		SentTime:  q.UnixTime{Time: time.Unix(msg.Date, 0)},
+		Username:  mainBot.FirstName,
+		MsgType:   "text",
+		Text:      sql.NullString{String: text, Valid: text != ""},
+		UserID:    mainBot.Id,
+	}
+	if mainBot.Username != "" {
+		content.AtableUsername = sql.NullString{String: mainBot.Username, Valid: true}
+	}
+	if thoughtSignature != "" {
+		content.ThoughtSignature = sql.NullString{String: thoughtSignature, Valid: true}
+	}
+	s.TmpContents = append(s.TmpContents, content)
 }
 
 func (s *GeminiSession) loadContentFromDatabase(ctx context.Context) error {
@@ -194,6 +284,20 @@ func (s *GeminiSession) loadContentFromDatabase(ctx context.Context) error {
 		}
 	}
 	s.Contents = content
+	return nil
+}
+
+func (s *GeminiSession) loadModel(ctx context.Context, fallback string) error {
+	provider, model, err := g.GetAISessionModel(ctx, s.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		model = fallback
+		provider = providerForModel(model)
+		err = g.SetAISessionModel(ctx, s.ID, provider, model)
+	}
+	if err != nil {
+		return err
+	}
+	s.Provider, s.Model = provider, model
 	return nil
 }
 
@@ -257,6 +361,9 @@ func GeminiGetSession(ctx context.Context, msg *gotgbot.Message, createNewSessio
 		if err != nil {
 			return nil
 		}
+		if err = session.loadModel(ctx, defaultAIModel); err != nil {
+			return nil
+		}
 		geminiSessions.sidToSess[sessionId] = session
 		geminiSessions.chatIdToSess[topic] = session
 		return session
@@ -279,7 +386,25 @@ create:
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
+	model, err := g.GetAIChatModel(ctx, topic.chatId, defaultAIModel)
+	if err != nil {
+		return nil
+	}
+	if err = session.loadModel(ctx, model); err != nil {
+		return nil
+	}
 	geminiSessions.sidToSess[session.ID] = session
 	geminiSessions.chatIdToSess[topic] = session
 	return session
+}
+
+func invalidateChatSessions(chatID int64) {
+	geminiSessions.mu.Lock()
+	defer geminiSessions.mu.Unlock()
+	for topic, session := range geminiSessions.chatIdToSess {
+		if topic.chatId == chatID {
+			delete(geminiSessions.chatIdToSess, topic)
+			delete(geminiSessions.sidToSess, session.ID)
+		}
+	}
 }

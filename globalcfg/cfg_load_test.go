@@ -31,6 +31,9 @@ func TestLoadConfig(t *testing.T) {
 	as.Equal("http://localhost:8081", cfg.TgApiUrl)
 	as.False(cfg.DropPendingUpdates)
 	as.Equal("ABCDEFGHIJKLMNOPQRST", cfg.GeminiKey)
+	as.Empty(cfg.DeepSeekKey)
+	as.Equal(DefaultDeepSeekBaseURL, cfg.DeepSeekBaseURL)
+	as.Equal(DefaultBackendAddr, cfg.BackendAddr)
 
 	as.Equal("http://localhost:7700", cfg.MeiliConfig.BaseUrl)
 	as.Equal("tgmsgs", cfg.MeiliConfig.IndexName)

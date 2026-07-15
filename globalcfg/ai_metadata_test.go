@@ -105,11 +105,23 @@ VALUES (7, 'gemini', 'gemini-3-flash-preview')`)
 	require.NoError(t, err)
 	require.Equal(t, AISessionRuntimeState{GeminiInteractionID: "int-test", WindowStartMsgID: 51}, runtimeState)
 
+	cacheState := AISessionRuntimeState{
+		WindowStartMsgID: 51, GeminiCacheName: "cachedContents/cache-7",
+		GeminiCacheExpireTime: 1_800_000_000, GeminiCacheStartMsgID: 51,
+		GeminiCacheEndMsgID: 88, GeminiCacheTokenCount: 5000,
+		GeminiCacheFingerprint: "fingerprint",
+	}
+	require.NoError(t, SetAISessionRuntimeStateFull(context.Background(), database, 7, cacheState))
+	runtimeState, err = getAISessionRuntimeState(context.Background(), database, 7)
+	require.NoError(t, err)
+	require.Equal(t, cacheState, runtimeState)
+
 	require.NoError(t, changeAISessionModel(context.Background(), database, 7,
 		"deepseek", "deepseek-v4-flash"))
 	runtimeState, err = getAISessionRuntimeState(context.Background(), database, 7)
 	require.NoError(t, err)
-	require.Equal(t, AISessionRuntimeState{WindowStartMsgID: 51, HistoryRebuildLossy: true}, runtimeState)
+	require.Equal(t, AISessionRuntimeState{WindowStartMsgID: 51, HistoryRebuildLossy: true}, runtimeState,
+		"model changes must clear provider-specific explicit cache state")
 	var provider, sessionModel string
 	require.NoError(t, database.QueryRow(`SELECT provider, model FROM ai_session_meta WHERE session_id=7`).
 		Scan(&provider, &sessionModel))

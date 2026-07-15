@@ -37,6 +37,7 @@ type GeminiSession struct {
 	PendingWindowDrop       int
 	PendingRuntimeState     bool
 	HistoryRebuildLossy     bool
+	GeminiCache             geminiExplicitCacheState
 
 	AllowCodeExecution bool
 	Provider           string
@@ -505,6 +506,14 @@ func (s *GeminiSession) loadModel(ctx context.Context, fallback string) error {
 	s.GeminiInteractionID = state.GeminiInteractionID
 	s.WindowStartMsgID = state.WindowStartMsgID
 	s.HistoryRebuildLossy = state.HistoryRebuildLossy
+	s.GeminiCache = geminiExplicitCacheState{
+		Name: state.GeminiCacheName, ExpireTime: time.Unix(state.GeminiCacheExpireTime, 0),
+		StartMsgID: state.GeminiCacheStartMsgID, EndMsgID: state.GeminiCacheEndMsgID,
+		TokenCount: state.GeminiCacheTokenCount, Fingerprint: state.GeminiCacheFingerprint,
+	}
+	if state.GeminiCacheExpireTime == 0 {
+		s.GeminiCache.ExpireTime = time.Time{}
+	}
 	if s.WindowStartMsgID != 0 {
 		found := false
 		for i := range s.Contents {
@@ -560,7 +569,17 @@ func (s *GeminiSession) PersistTmpUpdates(ctx context.Context) error {
 		}
 	}
 	if s.PendingRuntimeState {
-		err = g.SetAISessionRuntimeState(ctx, tx, s.ID, s.PendingInteractionID, s.PendingWindowStartMsgID)
+		cacheExpire := int64(0)
+		if !s.GeminiCache.ExpireTime.IsZero() {
+			cacheExpire = s.GeminiCache.ExpireTime.Unix()
+		}
+		err = g.SetAISessionRuntimeStateFull(ctx, tx, s.ID, g.AISessionRuntimeState{
+			GeminiInteractionID: s.PendingInteractionID, WindowStartMsgID: s.PendingWindowStartMsgID,
+			GeminiCacheName: s.GeminiCache.Name, GeminiCacheExpireTime: cacheExpire,
+			GeminiCacheStartMsgID: s.GeminiCache.StartMsgID, GeminiCacheEndMsgID: s.GeminiCache.EndMsgID,
+			GeminiCacheTokenCount:  s.GeminiCache.TokenCount,
+			GeminiCacheFingerprint: s.GeminiCache.Fingerprint,
+		})
 		if err != nil {
 			return err
 		}

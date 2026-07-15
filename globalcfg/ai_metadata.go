@@ -20,6 +20,12 @@ CREATE TABLE IF NOT EXISTS ai_session_meta (
     cached_input_tokens INTEGER NOT NULL DEFAULT 0,
     gemini_interaction_id TEXT,
     window_start_msg_id INTEGER,
+    gemini_cache_name TEXT,
+    gemini_cache_expire_time INTEGER,
+    gemini_cache_start_msg_id INTEGER,
+    gemini_cache_end_msg_id INTEGER,
+    gemini_cache_token_count INTEGER NOT NULL DEFAULT 0,
+    gemini_cache_fingerprint TEXT,
     history_rebuild_lossy INTEGER NOT NULL DEFAULT 0 CHECK (history_rebuild_lossy IN (0, 1)),
     FOREIGN KEY (session_id) REFERENCES gemini_sessions(id) ON DELETE CASCADE
 );
@@ -62,6 +68,12 @@ func initAIMetadataSchema(database *sql.DB) error {
 		{"ai_message_meta", "assistant_payload_format", "TEXT"},
 		{"ai_session_meta", "gemini_interaction_id", "TEXT"},
 		{"ai_session_meta", "window_start_msg_id", "INTEGER"},
+		{"ai_session_meta", "gemini_cache_name", "TEXT"},
+		{"ai_session_meta", "gemini_cache_expire_time", "INTEGER"},
+		{"ai_session_meta", "gemini_cache_start_msg_id", "INTEGER"},
+		{"ai_session_meta", "gemini_cache_end_msg_id", "INTEGER"},
+		{"ai_session_meta", "gemini_cache_token_count", "INTEGER NOT NULL DEFAULT 0"},
+		{"ai_session_meta", "gemini_cache_fingerprint", "TEXT"},
 		{"ai_session_meta", "history_rebuild_lossy", "INTEGER NOT NULL DEFAULT 0 CHECK (history_rebuild_lossy IN (0, 1))"},
 	}
 	for _, column := range columns {
@@ -203,7 +215,10 @@ func ChangeAISessionModel(ctx context.Context, sessionID int64, provider, model 
 
 func changeAISessionModel(ctx context.Context, executor AIResponseExecutor, sessionID int64, provider, model string) error {
 	result, err := executor.ExecContext(ctx, `UPDATE ai_session_meta
-SET provider = ?, model = ?, gemini_interaction_id = NULL, history_rebuild_lossy = 1
+SET provider = ?, model = ?, gemini_interaction_id = NULL, history_rebuild_lossy = 1,
+    gemini_cache_name = NULL, gemini_cache_expire_time = NULL,
+    gemini_cache_start_msg_id = NULL, gemini_cache_end_msg_id = NULL,
+    gemini_cache_token_count = 0, gemini_cache_fingerprint = NULL
 WHERE session_id = ?`, provider, model, sessionID)
 	if err != nil {
 		return err
@@ -244,9 +259,15 @@ type AIAssistantPayload struct {
 }
 
 type AISessionRuntimeState struct {
-	GeminiInteractionID string
-	WindowStartMsgID    int64
-	HistoryRebuildLossy bool
+	GeminiInteractionID    string
+	WindowStartMsgID       int64
+	GeminiCacheName        string
+	GeminiCacheExpireTime  int64
+	GeminiCacheStartMsgID  int64
+	GeminiCacheEndMsgID    int64
+	GeminiCacheTokenCount  int64
+	GeminiCacheFingerprint string
+	HistoryRebuildLossy    bool
 }
 
 func GetAISessionRuntimeState(ctx context.Context, sessionID int64) (state AISessionRuntimeState, err error) {
@@ -254,10 +275,14 @@ func GetAISessionRuntimeState(ctx context.Context, sessionID int64) (state AISes
 }
 
 func getAISessionRuntimeState(ctx context.Context, database *sql.DB, sessionID int64) (state AISessionRuntimeState, err error) {
-	var interactionID sql.NullString
-	var windowStart sql.NullInt64
-	err = database.QueryRowContext(ctx, `SELECT gemini_interaction_id, window_start_msg_id, history_rebuild_lossy
-FROM ai_session_meta WHERE session_id = ?`, sessionID).Scan(&interactionID, &windowStart, &state.HistoryRebuildLossy)
+	var interactionID, cacheName, cacheFingerprint sql.NullString
+	var windowStart, cacheExpire, cacheStart, cacheEnd sql.NullInt64
+	err = database.QueryRowContext(ctx, `SELECT gemini_interaction_id, window_start_msg_id,
+gemini_cache_name, gemini_cache_expire_time, gemini_cache_start_msg_id, gemini_cache_end_msg_id,
+gemini_cache_token_count, gemini_cache_fingerprint, history_rebuild_lossy
+FROM ai_session_meta WHERE session_id = ?`, sessionID).Scan(
+		&interactionID, &windowStart, &cacheName, &cacheExpire, &cacheStart, &cacheEnd,
+		&state.GeminiCacheTokenCount, &cacheFingerprint, &state.HistoryRebuildLossy)
 	if err != nil {
 		return state, err
 	}
@@ -267,23 +292,77 @@ FROM ai_session_meta WHERE session_id = ?`, sessionID).Scan(&interactionID, &win
 	if windowStart.Valid {
 		state.WindowStartMsgID = windowStart.Int64
 	}
+	if cacheName.Valid {
+		state.GeminiCacheName = cacheName.String
+	}
+	if cacheExpire.Valid {
+		state.GeminiCacheExpireTime = cacheExpire.Int64
+	}
+	if cacheStart.Valid {
+		state.GeminiCacheStartMsgID = cacheStart.Int64
+	}
+	if cacheEnd.Valid {
+		state.GeminiCacheEndMsgID = cacheEnd.Int64
+	}
+	if cacheFingerprint.Valid {
+		state.GeminiCacheFingerprint = cacheFingerprint.String
+	}
 	return state, nil
 }
 
 func SetAISessionRuntimeState(ctx context.Context, executor AIResponseExecutor, sessionID int64,
 	interactionID string, windowStartMsgID int64,
 ) error {
+	return setAISessionRuntimeState(ctx, executor, sessionID, AISessionRuntimeState{
+		GeminiInteractionID: interactionID, WindowStartMsgID: windowStartMsgID,
+	}, false)
+}
+
+func SetAISessionRuntimeStateFull(ctx context.Context, executor AIResponseExecutor, sessionID int64,
+	state AISessionRuntimeState,
+) error {
+	return setAISessionRuntimeState(ctx, executor, sessionID, state, true)
+}
+
+func setAISessionRuntimeState(ctx context.Context, executor AIResponseExecutor, sessionID int64,
+	state AISessionRuntimeState, includeCache bool,
+) error {
 	var interactionValue any
-	if interactionID != "" {
-		interactionValue = interactionID
+	if state.GeminiInteractionID != "" {
+		interactionValue = state.GeminiInteractionID
 	}
 	var windowValue any
-	if windowStartMsgID != 0 {
-		windowValue = windowStartMsgID
+	if state.WindowStartMsgID != 0 {
+		windowValue = state.WindowStartMsgID
 	}
-	result, err := executor.ExecContext(ctx, `UPDATE ai_session_meta
-SET gemini_interaction_id = ?, window_start_msg_id = ?, history_rebuild_lossy = 0 WHERE session_id = ?`,
-		interactionValue, windowValue, sessionID)
+	query := `UPDATE ai_session_meta
+SET gemini_interaction_id = ?, window_start_msg_id = ?, history_rebuild_lossy = 0 WHERE session_id = ?`
+	args := []any{interactionValue, windowValue, sessionID}
+	if includeCache {
+		var cacheName, cacheExpire, cacheStart, cacheEnd, cacheFingerprint any
+		if state.GeminiCacheName != "" {
+			cacheName = state.GeminiCacheName
+		}
+		if state.GeminiCacheExpireTime != 0 {
+			cacheExpire = state.GeminiCacheExpireTime
+		}
+		if state.GeminiCacheStartMsgID != 0 {
+			cacheStart = state.GeminiCacheStartMsgID
+		}
+		if state.GeminiCacheEndMsgID != 0 {
+			cacheEnd = state.GeminiCacheEndMsgID
+		}
+		if state.GeminiCacheFingerprint != "" {
+			cacheFingerprint = state.GeminiCacheFingerprint
+		}
+		query = `UPDATE ai_session_meta SET gemini_interaction_id = ?, window_start_msg_id = ?,
+gemini_cache_name = ?, gemini_cache_expire_time = ?, gemini_cache_start_msg_id = ?,
+gemini_cache_end_msg_id = ?, gemini_cache_token_count = ?, gemini_cache_fingerprint = ?,
+history_rebuild_lossy = 0 WHERE session_id = ?`
+		args = []any{interactionValue, windowValue, cacheName, cacheExpire, cacheStart, cacheEnd,
+			state.GeminiCacheTokenCount, cacheFingerprint, sessionID}
+	}
+	result, err := executor.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
 	}

@@ -491,31 +491,7 @@ func isInteractionCompatibilityError(err error) bool {
 func generateContentFallback(ctx context.Context, session *GeminiSession, config *genai.GenerateContentConfig,
 	window aiRequestWindow,
 ) (*AIResult, error) {
-	contents := genaiContentsFromDatabase(window.Contents, session.AssistantPayloads)
-	if session.HistoryRebuildLossy {
-		historyEnd := len(window.Contents) - len(session.TmpContents)
-		if historyEnd < 0 {
-			historyEnd = 0
-		}
-		contents = make([]*genai.Content, 0, len(window.Contents))
-		for index := range window.Contents[:historyEnd] {
-			content := &window.Contents[index]
-			if content.Role == genai.RoleModel {
-				if content.Text.Valid && content.Text.String != "" {
-					contents = append(contents, &genai.Content{Role: genai.RoleModel,
-						Parts: []*genai.Part{{Text: content.Text.String}}})
-				}
-				continue
-			}
-			if len(content.Blob) > 0 && (!content.Text.Valid || content.Text.String == "") {
-				continue
-			}
-			contents = append(contents, &genai.Content{Role: content.Role,
-				Parts: []*genai.Part{{Text: compactUserText(content)}}})
-		}
-		contents = append(contents,
-			genaiContentsFromDatabase(window.Contents[historyEnd:], session.AssistantPayloads)...)
-	}
+	contents := geminiContentsForWindow(session, window)
 	response, err := generateGeminiContents(ctx, session.Model, contents, config)
 	if err != nil {
 		return nil, err
@@ -527,6 +503,39 @@ func generateContentFallback(ctx context.Context, session *GeminiSession, config
 	result.WindowStartMsgID = window.StartMsgID
 	result.WindowDrop = window.Drop
 	return result, nil
+}
+
+func lossyGeminiContents(records []q.GeminiContent) []*genai.Content {
+	contents := make([]*genai.Content, 0, len(records))
+	for index := range records {
+		content := &records[index]
+		if content.Role == genai.RoleModel {
+			if content.Text.Valid && content.Text.String != "" {
+				contents = append(contents, &genai.Content{Role: genai.RoleModel,
+					Parts: []*genai.Part{{Text: content.Text.String}}})
+			}
+			continue
+		}
+		if len(content.Blob) > 0 && (!content.Text.Valid || content.Text.String == "") {
+			continue
+		}
+		contents = append(contents, &genai.Content{Role: content.Role,
+			Parts: []*genai.Part{{Text: compactUserText(content)}}})
+	}
+	return contents
+}
+
+func geminiContentsForWindow(session *GeminiSession, window aiRequestWindow) []*genai.Content {
+	if !session.HistoryRebuildLossy {
+		return genaiContentsFromDatabase(window.Contents, session.AssistantPayloads)
+	}
+	historyEnd := len(window.Contents) - len(session.TmpContents)
+	if historyEnd < 0 {
+		historyEnd = 0
+	}
+	contents := lossyGeminiContents(window.Contents[:historyEnd])
+	return append(contents,
+		genaiContentsFromDatabase(window.Contents[historyEnd:], session.AssistantPayloads)...)
 }
 
 func generateGeminiWithInteractions(ctx context.Context, session *GeminiSession, systemPrompt string,

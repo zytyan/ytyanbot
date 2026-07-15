@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -108,4 +109,84 @@ func TestCountTokensAndAPIError(t *testing.T) {
 	require.ErrorAs(t, err, &apiError)
 	require.Equal(t, http.StatusBadRequest, apiError.StatusCode)
 	require.Equal(t, "bad request", apiError.Message)
+}
+
+func TestCountTokensRejectsDeveloperAPIUnsupportedConfig(t *testing.T) {
+	t.Parallel()
+	client, err := NewClient(context.Background(), &ClientConfig{APIKey: "test"})
+	require.NoError(t, err)
+	_, err = client.Models.CountTokens(context.Background(), "gemini-3-flash-preview", nil,
+		&CountTokensConfig{SystemInstruction: NewContentFromText("system", RoleModel)})
+	require.ErrorContains(t, err, "does not support systemInstruction or tools")
+}
+
+func TestCachedContentsLifecycle(t *testing.T) {
+	t.Parallel()
+	requests := 0
+	httpClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requests++
+		require.Equal(t, "test-key", r.Header.Get("x-goog-api-key"))
+		switch requests {
+		case 1:
+			require.Equal(t, http.MethodPost, r.Method)
+			require.Equal(t, "/v1beta/cachedContents", r.URL.Path)
+			var payload map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			require.Equal(t, "models/gemini-3-flash-preview", payload["model"])
+			require.Equal(t, "900s", payload["ttl"])
+			require.Equal(t, "session-7", payload["displayName"])
+			require.Contains(t, payload, "systemInstruction")
+			require.Contains(t, payload, "tools")
+			return jsonResponse(http.StatusOK, `{
+                  "name":"cachedContents/cache-1","model":"models/gemini-3-flash-preview",
+                  "expireTime":"2026-07-15T12:15:00Z","usageMetadata":{"totalTokenCount":5000}}`), nil
+		case 2:
+			require.Equal(t, http.MethodPatch, r.Method)
+			require.Equal(t, "/v1beta/cachedContents/cache-1", r.URL.Path)
+			require.Equal(t, "ttl", r.URL.Query().Get("updateMask"))
+			var payload map[string]string
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			require.Equal(t, "900s", payload["ttl"])
+			return jsonResponse(http.StatusOK, `{
+                  "name":"cachedContents/cache-1","expireTime":"2026-07-15T12:20:00Z",
+                  "usageMetadata":{"totalTokenCount":5000}}`), nil
+		case 3:
+			require.Equal(t, http.MethodDelete, r.Method)
+			require.Equal(t, "/v1beta/cachedContents/cache-1", r.URL.Path)
+			return jsonResponse(http.StatusNoContent, ""), nil
+		default:
+			t.Fatalf("unexpected request %d", requests)
+			return nil, nil
+		}
+	})}
+	client, err := NewClient(context.Background(), &ClientConfig{
+		APIKey: "test-key", BaseURL: "https://example.test/v1beta", HTTPClient: httpClient,
+	})
+	require.NoError(t, err)
+	created, err := client.Caches.Create(context.Background(), "gemini-3-flash-preview",
+		&CreateCachedContentConfig{
+			DisplayName: "session-7", TTL: 15 * time.Minute,
+			SystemInstruction: NewContentFromText("system", RoleModel),
+			Contents:          []*Content{NewContentFromText("stable prefix", RoleUser)},
+			Tools:             []*Tool{{GoogleSearch: &GoogleSearch{}}},
+		})
+	require.NoError(t, err)
+	require.Equal(t, "cachedContents/cache-1", created.Name)
+	require.Equal(t, int32(5000), created.UsageMetadata.TotalTokenCount)
+	require.Equal(t, time.Date(2026, 7, 15, 12, 15, 0, 0, time.UTC), created.ExpireTime)
+
+	updated, err := client.Caches.UpdateTTL(context.Background(), created.Name, 15*time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, time.Date(2026, 7, 15, 12, 20, 0, 0, time.UTC), updated.ExpireTime)
+	require.NoError(t, client.Caches.Delete(context.Background(), created.Name))
+	require.Equal(t, 3, requests)
+}
+
+func TestCachedContentRejectsInvalidResourceName(t *testing.T) {
+	t.Parallel()
+	client, err := NewClient(context.Background(), &ClientConfig{APIKey: "test"})
+	require.NoError(t, err)
+	_, err = client.Caches.UpdateTTL(context.Background(), "models/not-a-cache", time.Minute)
+	require.ErrorContains(t, err, "invalid Gemini cached content name")
+	require.Error(t, client.Caches.Delete(context.Background(), "cachedContents/a/b"))
 }

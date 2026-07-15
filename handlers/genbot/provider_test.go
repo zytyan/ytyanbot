@@ -567,6 +567,51 @@ func TestPersistTmpUpdatesStoresBodyPayloadAndUsageAtomically(t *testing.T) {
 	require.ErrorIs(t, err, sql.ErrNoRows)
 }
 
+func TestExplicitCacheStatePersistsWithResponseAndReloads(t *testing.T) {
+	ctx := context.Background()
+	dbSession, err := g.Q.CreateNewGeminiSession(ctx, -900020, "explicit cache state", "private")
+	require.NoError(t, err)
+	require.NoError(t, g.SetAISessionModel(ctx, dbSession.ID, ProviderGemini, ModelGeminiFlash))
+	previousBot := mainBot
+	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot", Username: "testbot"}}
+	t.Cleanup(func() { mainBot = previousBot })
+
+	userContent := testContent("text", "hello")
+	userContent.SessionID = dbSession.ID
+	userContent.ChatID = -900020
+	userContent.MsgID = 6101
+	expireTime := time.Unix(1_800_000_000, 0)
+	session := &GeminiSession{
+		GeminiSession: dbSession, Provider: ProviderGemini, Model: ModelGeminiFlash,
+		TmpContents: []q.GeminiContent{userContent},
+		GeminiCache: geminiExplicitCacheState{
+			Name: "cachedContents/session-cache", ExpireTime: expireTime,
+			StartMsgID: 6101, EndMsgID: 6101, TokenCount: 5000, Fingerprint: "fingerprint",
+		},
+	}
+	session.AddModelMessage(&gotgbot.Message{
+		MessageId: 6102, Date: 123, Chat: gotgbot.Chat{Id: -900020, Type: "private"},
+	}, &AIResult{
+		DisplayText: "answer", AssistantPayload: []byte(`{"role":"model","parts":[{"text":"answer"}]}`),
+		AssistantPayloadFormat: PayloadFormatGeminiContent, WindowStartMsgID: 6101,
+	})
+	require.NoError(t, session.PersistTmpUpdates(ctx))
+
+	runtimeState, err := g.GetAISessionRuntimeState(ctx, dbSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, "cachedContents/session-cache", runtimeState.GeminiCacheName)
+	require.Equal(t, expireTime.Unix(), runtimeState.GeminiCacheExpireTime)
+	require.Equal(t, int64(6101), runtimeState.GeminiCacheStartMsgID)
+	require.Equal(t, int64(6101), runtimeState.GeminiCacheEndMsgID)
+	require.Equal(t, int64(5000), runtimeState.GeminiCacheTokenCount)
+	require.Equal(t, "fingerprint", runtimeState.GeminiCacheFingerprint)
+
+	reloaded := &GeminiSession{GeminiSession: dbSession}
+	require.NoError(t, reloaded.loadContentFromDatabase(ctx))
+	require.NoError(t, reloaded.loadModel(ctx, defaultAIModel))
+	require.Equal(t, session.GeminiCache, reloaded.GeminiCache)
+}
+
 func TestPersistedSlidingWindowKeepsFullDatabaseHistory(t *testing.T) {
 	ctx := context.Background()
 	dbSession, err := g.Q.CreateNewGeminiSession(ctx, -900003, "window persistence", "private")

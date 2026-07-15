@@ -6,6 +6,7 @@ package geminiapi
 import (
 	"encoding/json"
 	"strings"
+	"time"
 )
 
 const (
@@ -233,4 +234,26 @@ type CountTokensConfig struct {
 type CountTokensResponse struct {
 	TotalTokens             int32 `json:"totalTokens,omitempty"`
 	CachedContentTokenCount int32 `json:"cachedContentTokenCount,omitempty"`
+}
+
+type CreateCachedContentConfig struct {
+	DisplayName       string
+	SystemInstruction *Content
+	Contents          []*Content
+	Tools             []*Tool
+	TTL               time.Duration
+}
+
+type CachedContentUsageMetadata struct {
+	TotalTokenCount int32 `json:"totalTokenCount,omitempty"`
+}
+
+type CachedContent struct {
+	Name          string                      `json:"name,omitempty"`
+	DisplayName   string                      `json:"displayName,omitempty"`
+	Model         string                      `json:"model,omitempty"`
+	CreateTime    time.Time                   `json:"createTime,omitempty"`
+	UpdateTime    time.Time                   `json:"updateTime,omitempty"`
+	ExpireTime    time.Time                   `json:"expireTime,omitempty"`
+	UsageMetadata *CachedContentUsageMetadata `json:"usageMetadata,omitempty"`
 }

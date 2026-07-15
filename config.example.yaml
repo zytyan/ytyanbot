@@ -20,6 +20,7 @@ save-message: true
 tg-api-url: http://localhost:8081
 drop-pending-updates: false
 gemini-key: ABCDEFGHIJKLMNOPQRST
+gemini-explicit-cache: true
 deepseek-key: ""
 deepseek-base-url: https://api.deepseek.com
 backend-addr: 127.0.0.1:4021

@@ -28,9 +28,16 @@ type ClientConfig struct {
 
 type Client struct {
 	Models *Models
+	Caches *Caches
 }
 
 type Models struct {
+	apiKey     string
+	baseURL    string
+	httpClient *http.Client
+}
+
+type Caches struct {
 	apiKey     string
 	baseURL    string
 	httpClient *http.Client
@@ -61,9 +68,10 @@ func NewClient(_ context.Context, config *ClientConfig) (*Client, error) {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 15 * time.Minute}
 	}
-	return &Client{Models: &Models{
-		apiKey: config.APIKey, baseURL: baseURL, httpClient: httpClient,
-	}}, nil
+	return &Client{
+		Models: &Models{apiKey: config.APIKey, baseURL: baseURL, httpClient: httpClient},
+		Caches: &Caches{apiKey: config.APIKey, baseURL: baseURL, httpClient: httpClient},
+	}, nil
 }
 
 type generateContentRequest struct {
@@ -119,19 +127,16 @@ func (m *Models) GenerateContent(ctx context.Context, model string, contents []*
 }
 
 type countTokensRequest struct {
-	Contents          []*Content `json:"contents"`
-	SystemInstruction *Content   `json:"systemInstruction,omitempty"`
-	Tools             []*Tool    `json:"tools,omitempty"`
+	Contents []*Content `json:"contents"`
 }
 
 func (m *Models) CountTokens(ctx context.Context, model string, contents []*Content,
 	config *CountTokensConfig,
 ) (*CountTokensResponse, error) {
-	request := countTokensRequest{Contents: contents}
-	if config != nil {
-		request.SystemInstruction = config.SystemInstruction
-		request.Tools = config.Tools
+	if config != nil && (config.SystemInstruction != nil || len(config.Tools) > 0) {
+		return nil, errors.New("Gemini Developer API countTokens does not support systemInstruction or tools")
 	}
+	request := countTokensRequest{Contents: contents}
 	var response CountTokensResponse
 	if err := m.call(ctx, model, "countTokens", request, &response); err != nil {
 		return nil, err
@@ -140,19 +145,97 @@ func (m *Models) CountTokens(ctx context.Context, model string, contents []*Cont
 }
 
 func (m *Models) call(ctx context.Context, model, method string, request, response any) error {
-	payload, err := json.Marshal(request)
-	if err != nil {
-		return err
-	}
 	model = strings.TrimPrefix(model, "models/")
 	endpoint := m.baseURL + "/models/" + url.PathEscape(model) + ":" + method
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	return callAPI(ctx, m.httpClient, m.apiKey, http.MethodPost, endpoint, request, response)
+}
+
+type createCachedContentRequest struct {
+	Model             string     `json:"model"`
+	DisplayName       string     `json:"displayName,omitempty"`
+	SystemInstruction *Content   `json:"systemInstruction,omitempty"`
+	Contents          []*Content `json:"contents"`
+	Tools             []*Tool    `json:"tools,omitempty"`
+	TTL               string     `json:"ttl,omitempty"`
+}
+
+func (c *Caches) Create(ctx context.Context, model string, config *CreateCachedContentConfig) (*CachedContent, error) {
+	if config == nil {
+		return nil, errors.New("Gemini cache config is nil")
+	}
+	model = strings.TrimPrefix(model, "models/")
+	request := createCachedContentRequest{
+		Model: "models/" + model, DisplayName: config.DisplayName,
+		SystemInstruction: config.SystemInstruction, Contents: config.Contents, Tools: config.Tools,
+	}
+	if config.TTL > 0 {
+		request.TTL = formatTTL(config.TTL)
+	}
+	var response CachedContent
+	if err := callAPI(ctx, c.httpClient, c.apiKey, http.MethodPost,
+		c.baseURL+"/cachedContents", request, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
+func (c *Caches) UpdateTTL(ctx context.Context, name string, ttl time.Duration) (*CachedContent, error) {
+	resource, err := cachedContentResource(name)
+	if err != nil {
+		return nil, err
+	}
+	endpoint := c.baseURL + "/" + resource + "?updateMask=ttl"
+	var response CachedContent
+	if err := callAPI(ctx, c.httpClient, c.apiKey, http.MethodPatch, endpoint,
+		map[string]string{"ttl": formatTTL(ttl)}, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
+func (c *Caches) Delete(ctx context.Context, name string) error {
+	resource, err := cachedContentResource(name)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", m.apiKey)
-	resp, err := m.httpClient.Do(req)
+	return callAPI(ctx, c.httpClient, c.apiKey, http.MethodDelete,
+		c.baseURL+"/"+resource, nil, nil)
+}
+
+func formatTTL(ttl time.Duration) string {
+	seconds := int64((ttl + time.Second - 1) / time.Second)
+	return fmt.Sprintf("%ds", seconds)
+}
+
+func cachedContentResource(name string) (string, error) {
+	name = strings.TrimPrefix(strings.TrimSpace(name), "/")
+	id, ok := strings.CutPrefix(name, "cachedContents/")
+	if !ok || id == "" || strings.Contains(id, "/") {
+		return "", fmt.Errorf("invalid Gemini cached content name %q", name)
+	}
+	return "cachedContents/" + url.PathEscape(id), nil
+}
+
+func callAPI(ctx context.Context, client *http.Client, apiKey, method, endpoint string,
+	request, response any,
+) error {
+	var bodyReader io.Reader
+	if request != nil {
+		payload, err := json.Marshal(request)
+		if err != nil {
+			return err
+		}
+		bodyReader = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, bodyReader)
+	if err != nil {
+		return err
+	}
+	if request != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("x-goog-api-key", apiKey)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -174,8 +257,11 @@ func (m *Models) call(ctx context.Context, model, method string, request, respon
 		}
 		return &APIError{StatusCode: resp.StatusCode, Message: message, Body: body}
 	}
+	if response == nil || len(body) == 0 {
+		return nil
+	}
 	if err := json.Unmarshal(body, response); err != nil {
-		return fmt.Errorf("decode Gemini %s response: %w", method, err)
+		return fmt.Errorf("decode Gemini API response: %w", err)
 	}
 	return nil
 }

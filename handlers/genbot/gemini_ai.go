@@ -230,7 +230,12 @@ func generateGemini(ctx context.Context, session *GeminiSession, config *genai.G
 func generateGeminiContents(ctx context.Context, model string, contents []*genai.Content,
 	config *genai.GenerateContentConfig,
 ) (res *genai.GenerateContentResponse, err error) {
-	client := getGenAiClient()
+	return generateGeminiContentsWithClient(ctx, getGenAiClient(), model, contents, config)
+}
+
+func generateGeminiContentsWithClient(ctx context.Context, client *genai.Client, model string,
+	contents []*genai.Content, config *genai.GenerateContentConfig,
+) (res *genai.GenerateContentResponse, err error) {
 	base := 3.0
 	jitter := 0.1
 	multiplier := 1.5
@@ -268,6 +273,11 @@ func generateGeminiContents(ctx context.Context, model string, contents []*genai
 		}
 		res, err = client.Models.GenerateContent(ctx, model, contents, config)
 		if err != nil {
+			var apiError *genai.APIError
+			if errors.As(err, &apiError) && apiError.StatusCode >= 400 && apiError.StatusCode < 500 &&
+				apiError.StatusCode != 408 && apiError.StatusCode != 429 {
+				break
+			}
 			wait()
 			continue
 		}

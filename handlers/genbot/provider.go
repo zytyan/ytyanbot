@@ -102,7 +102,7 @@ func generateAI(ctx context.Context, session *GeminiSession, systemPrompt string
 		result, err = generateDeepSeek(ctx, session, systemPrompt, window)
 	} else {
 		configureGeminiThinking(session.Model, geminiConfig)
-		result, err = generateGeminiWithInteractions(ctx, session, systemPrompt, geminiConfig, window)
+		result, err = generateGeminiWithCachePolicy(ctx, session, systemPrompt, geminiConfig, window)
 	}
 	if result != nil {
 		result.WindowStartMsgID = window.StartMsgID

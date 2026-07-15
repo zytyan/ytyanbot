@@ -42,26 +42,27 @@ type MeiliConfig struct {
 }
 
 type Config struct {
-	BotToken           string      `koanf:"bot-token"`
-	God                int64       `koanf:"god"`
-	MyChats            []int64     `koanf:"my-chats"`
-	AIChats            []int64     `koanf:"ai-chats"`
-	MeiliConfig        MeiliConfig `koanf:"meili-config"`
-	ContentModerator   Azure       `koanf:"content-moderator"`
-	Ocr                OcrConfig   `koanf:"ocr"`
-	QrScanUrl          string      `koanf:"qr-scan-url"`
-	SaveMessage        bool        `koanf:"save-message"`
-	TgApiUrl           string      `koanf:"tg-api-url"`
-	DropPendingUpdates bool        `koanf:"drop-pending-updates"`
-	LogLevel           int8        `koanf:"log-level"`
-	DatabasePath       string      `koanf:"database-path"`
-	GeminiKey          string      `koanf:"gemini-key"`
-	DeepSeekKey        string      `koanf:"deepseek-key"`
-	DeepSeekBaseURL    string      `koanf:"deepseek-base-url"`
-	BackendAddr        string      `koanf:"backend-addr"`
-	MsgDbPath          string      `koanf:"msg-db-path"`
-	MeiliWalDbPath     string      `koanf:"meili-wal-db-path"`
-	MeiliWalBatchSize  int         `koanf:"meili-wal-batch-size"`
+	BotToken            string      `koanf:"bot-token"`
+	God                 int64       `koanf:"god"`
+	MyChats             []int64     `koanf:"my-chats"`
+	AIChats             []int64     `koanf:"ai-chats"`
+	MeiliConfig         MeiliConfig `koanf:"meili-config"`
+	ContentModerator    Azure       `koanf:"content-moderator"`
+	Ocr                 OcrConfig   `koanf:"ocr"`
+	QrScanUrl           string      `koanf:"qr-scan-url"`
+	SaveMessage         bool        `koanf:"save-message"`
+	TgApiUrl            string      `koanf:"tg-api-url"`
+	DropPendingUpdates  bool        `koanf:"drop-pending-updates"`
+	LogLevel            int8        `koanf:"log-level"`
+	DatabasePath        string      `koanf:"database-path"`
+	GeminiKey           string      `koanf:"gemini-key"`
+	GeminiExplicitCache *bool       `koanf:"gemini-explicit-cache"`
+	DeepSeekKey         string      `koanf:"deepseek-key"`
+	DeepSeekBaseURL     string      `koanf:"deepseek-base-url"`
+	BackendAddr         string      `koanf:"backend-addr"`
+	MsgDbPath           string      `koanf:"msg-db-path"`
+	MeiliWalDbPath      string      `koanf:"meili-wal-db-path"`
+	MeiliWalBatchSize   int         `koanf:"meili-wal-batch-size"`
 
 	LogFile  string `koanf:"log-file"`
 	NoStdout bool   `koanf:"no-stdout"`
@@ -275,6 +276,11 @@ func InitConfig() {
 
 func GetConfig() *Config {
 	return config.Load()
+}
+
+func GeminiExplicitCacheEnabled() bool {
+	cfg := GetConfig()
+	return cfg.GeminiExplicitCache == nil || *cfg.GeminiExplicitCache
 }
 
 func Ocr() *azure.Ocr {

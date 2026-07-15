@@ -50,6 +50,35 @@ func requireLiveAI(t *testing.T) {
 	}
 }
 
+func liveGeminiPrefixNearTokens(t *testing.T, model string, target int32) string {
+	t.Helper()
+	repeats := int(target / 3)
+	if repeats < 1 {
+		repeats = 1
+	}
+	unit := "stable explicit cache probe token. "
+	var text string
+	var tokens int32
+	for range 4 {
+		text = strings.Repeat(unit, repeats)
+		count, err := getGenAiClient().Models.CountTokens(context.Background(), model,
+			[]*genai.Content{genai.NewContentFromText(text, genai.RoleUser)}, nil)
+		require.NoError(t, err)
+		tokens = count.TotalTokens
+		if tokens >= target-200 && tokens <= target+200 {
+			break
+		}
+		require.Greater(t, tokens, int32(0))
+		repeats = int(int64(repeats) * int64(target) / int64(tokens))
+		if repeats < 1 {
+			repeats = 1
+		}
+	}
+	require.InDelta(t, target, tokens, 200, "live cache probe must stay near 5K tokens")
+	t.Logf("gemini synthetic cache prefix tokens=%d", tokens)
+	return text
+}
+
 func TestLiveGeminiImplicitCache(t *testing.T) {
 	requireLiveAI(t)
 	session := loadLiveSession(t)
@@ -74,13 +103,53 @@ func TestLiveGeminiImplicitCache(t *testing.T) {
 	require.Greater(t, second.UsageMetadata.CachedContentTokenCount, int32(0))
 }
 
+func TestLiveGeminiExplicitCacheFiveK(t *testing.T) {
+	requireLiveAI(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	now := time.Now()
+	stablePrefix := q.GeminiContent{
+		MsgID: 71, Role: genai.RoleUser, Username: "cache tester", MsgType: "text",
+		SentTime: q.UnixTime{Time: now.Add(-10 * time.Minute)},
+		Text:     sql.NullString{String: liveGeminiPrefixNearTokens(t, ModelGeminiFlash, 5000), Valid: true},
+	}
+	current := q.GeminiContent{
+		MsgID: 72, Role: genai.RoleUser, Username: "cache tester", MsgType: "text",
+		SentTime: q.UnixTime{Time: now}, Text: sql.NullString{String: "只回答 OK。", Valid: true},
+	}
+	session := &GeminiSession{
+		GeminiSession: q.GeminiSession{ID: 9_005_001}, Contents: []q.GeminiContent{stablePrefix},
+		TmpContents: []q.GeminiContent{current}, AssistantPayloads: make(map[int64]g.AIAssistantPayload),
+		Provider: ProviderGemini, Model: ModelGeminiFlash,
+	}
+	config := &genai.GenerateContentConfig{
+		Tools:           []*genai.Tool{{GoogleSearch: &genai.GoogleSearch{}, CodeExecution: &genai.ToolCodeExecution{}}},
+		ThinkingConfig:  &genai.ThinkingConfig{IncludeThoughts: true, ThinkingLevel: genai.ThinkingLevelLow},
+		MaxOutputTokens: 32,
+	}
+	result, used, err := tryGeminiExplicitCache(ctx, getGenAiClient(), session,
+		"显式缓存验证；只回答 OK。", config, session.prepareRequestWindow(), now)
+	require.NoError(t, err)
+	require.True(t, used)
+	require.NotEmpty(t, session.GeminiCache.Name)
+	t.Cleanup(func() {
+		if deleteErr := getGenAiClient().Caches.Delete(context.Background(), session.GeminiCache.Name); deleteErr != nil {
+			t.Errorf("delete live explicit cache: %v", deleteErr)
+		}
+	})
+	require.InDelta(t, 5000, session.GeminiCache.TokenCount, 400)
+	require.NotEmpty(t, result.DisplayText)
+	require.Greater(t, result.Usage.CachedInputTokens, int64(0))
+	t.Logf("gemini explicit cache tokens=%d prompt=%d cached=%d", session.GeminiCache.TokenCount,
+		result.Usage.InputTokens, result.Usage.CachedInputTokens)
+}
+
 func TestLiveGeminiInteractionsImplicitCache(t *testing.T) {
 	requireLiveAI(t)
 	stablePrefix := q.GeminiContent{
 		MsgID: 101, Role: genai.RoleUser, Username: "cache tester", MsgType: "text",
 		SentTime: q.UnixTime{Time: time.Unix(101, 0)},
-		Text: sql.NullString{String: strings.Repeat(
-			"这是用于验证 Interactions 隐式缓存的稳定公共前缀，不包含任何真实用户数据。", 2500), Valid: true},
+		Text:     sql.NullString{String: liveGeminiPrefixNearTokens(t, ModelGeminiFlash, 5000), Valid: true},
 	}
 	firstQuestion := q.GeminiContent{
 		MsgID: 102, Role: genai.RoleUser, Username: "cache tester", MsgType: "text",
@@ -129,8 +198,7 @@ func TestLiveGeminiInteractionsFlashLite(t *testing.T) {
 	stablePrefix := q.GeminiContent{
 		MsgID: 151, Role: genai.RoleUser, Username: "cache tester", MsgType: "text",
 		SentTime: q.UnixTime{Time: time.Unix(151, 0)},
-		Text: sql.NullString{String: strings.Repeat(
-			"这是用于验证 Flash-Lite Interactions 缓存的稳定公共前缀。", 2500), Valid: true},
+		Text:     sql.NullString{String: liveGeminiPrefixNearTokens(t, ModelGeminiFlashLite, 5000), Valid: true},
 	}
 	question := q.GeminiContent{
 		MsgID: 152, Role: genai.RoleUser, Username: "cache tester", MsgType: "text",
@@ -170,8 +238,7 @@ func TestLiveGeminiInteractionsToolsAndRawReplay(t *testing.T) {
 	stablePrefix := q.GeminiContent{
 		MsgID: 201, Role: genai.RoleUser, Username: "cache tester", MsgType: "text",
 		SentTime: q.UnixTime{Time: time.Unix(201, 0)},
-		Text: sql.NullString{String: strings.Repeat(
-			"这是用于验证 Interactions 工具历史与缓存的稳定公共前缀。", 2500), Valid: true},
+		Text:     sql.NullString{String: liveGeminiPrefixNearTokens(t, ModelGeminiFlash, 5000), Valid: true},
 	}
 	question := q.GeminiContent{
 		MsgID: 202, Role: genai.RoleUser, Username: "cache tester", MsgType: "text",
@@ -222,7 +289,7 @@ func TestLiveGeminiToolsRawReplayAndCache(t *testing.T) {
 	stablePrefix := q.GeminiContent{
 		MsgID: 1, Role: genai.RoleUser, Username: "cache tester", MsgType: "text",
 		SentTime: q.UnixTime{Time: time.Unix(1, 0)},
-		Text:     sql.NullString{String: strings.Repeat("这是用于验证隐式缓存的稳定公共前缀，不包含任何真实用户数据。", 2500), Valid: true},
+		Text:     sql.NullString{String: liveGeminiPrefixNearTokens(t, ModelGeminiFlash, 5000), Valid: true},
 	}
 	firstQuestion := q.GeminiContent{
 		MsgID: 2, Role: genai.RoleUser, Username: "cache tester", MsgType: "text",

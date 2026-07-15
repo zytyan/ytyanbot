@@ -361,6 +361,13 @@ func (s *GeminiSession) AddTgMessageWithReply(ctx context.Context, bot *gotgbot.
 		if err := s.AddTgMessage(bot, &repliedCopy); err != nil {
 			return err
 		}
+		if len(s.TmpContents) > before {
+			added := &s.TmpContents[len(s.TmpContents)-1]
+			// DeepSeek deliberately skips a captionless video/animation, leaving
+			// no database-storable body. Keep it in this request's ordered input
+			// without attempting an invalid INSERT after the model replies.
+			contextOnly = contextOnly || (!added.Text.Valid && len(added.Blob) == 0)
+		}
 		if contextOnly && len(s.TmpContents) > before {
 			if s.TmpContextOnlyMsgIDs == nil {
 				s.TmpContextOnlyMsgIDs = make(map[int64]struct{})

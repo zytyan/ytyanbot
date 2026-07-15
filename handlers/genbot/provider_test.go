@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	g "main/globalcfg"
 	"main/globalcfg/q"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -284,6 +286,98 @@ func TestReplyOutsideActiveWindowIsContextOnlyAndDoesNotDuplicateDatabaseRow(t *
 	require.Len(t, saved, 1)
 	require.Equal(t, int64(882002), saved[0].MsgID)
 	require.Len(t, session.Contents, 2, "the replied message remains in the active in-memory chain")
+}
+
+type localMediaBotClient struct {
+	paths map[string]string
+}
+
+func (c localMediaBotClient) RequestWithContext(_ context.Context, _ string, method string,
+	params map[string]any, _ *gotgbot.RequestOpts,
+) (json.RawMessage, error) {
+	if method != "getFile" {
+		return nil, fmt.Errorf("unexpected bot method %s", method)
+	}
+	fileID, _ := params["file_id"].(string)
+	return json.Marshal(gotgbot.File{FileId: fileID, FileUniqueId: fileID + "-unique", FilePath: c.paths[fileID]})
+}
+
+func (localMediaBotClient) GetAPIURL(*gotgbot.RequestOpts) string { return "https://example.test" }
+func (localMediaBotClient) FileURL(string, string, *gotgbot.RequestOpts) string {
+	return "https://example.test/file"
+}
+
+func TestReplyPhotoAndVideoUseNormalGeminiMediaParts(t *testing.T) {
+	previousBot := mainBot
+	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot"}}
+	t.Cleanup(func() { mainBot = previousBot })
+	photoPath := t.TempDir() + "/photo.jpg"
+	videoPath := t.TempDir() + "/video.mp4"
+	require.NoError(t, os.WriteFile(photoPath, []byte("photo-bytes"), 0o600))
+	require.NoError(t, os.WriteFile(videoPath, []byte("video-bytes"), 0o600))
+	bot := &gotgbot.Bot{BotClient: localMediaBotClient{paths: map[string]string{
+		"reply-photo-file": photoPath, "reply-video-file": videoPath,
+	}}}
+	user := &gotgbot.User{Id: 42, FirstName: "Alice"}
+
+	photoReply := &gotgbot.Message{MessageId: 883001, Date: 120,
+		Chat: gotgbot.Chat{Id: -910104, Type: "supergroup"}, From: user,
+		Photo: []gotgbot.PhotoSize{{FileId: "reply-photo-file", FileUniqueId: "photo-unique"}}}
+	photoCurrent := &gotgbot.Message{MessageId: 883002, Date: 123,
+		Chat: gotgbot.Chat{Id: -910104, Type: "supergroup"}, From: user,
+		Text: "describe it", ReplyToMessage: photoReply}
+	photoSession := &GeminiSession{GeminiSession: q.GeminiSession{ID: 810104}, Provider: ProviderGemini}
+	require.NoError(t, photoSession.AddTgMessageWithReply(context.Background(), bot, photoCurrent))
+	require.Len(t, photoSession.TmpContents, 2)
+	require.Equal(t, "photo", photoSession.TmpContents[0].MsgType)
+	require.Equal(t, []byte("photo-bytes"), photoSession.TmpContents[0].Blob)
+	photoSteps, err := interactionStepsForContents(photoSession.TmpContents, nil)
+	require.NoError(t, err)
+	require.Contains(t, string(bytesJoinRaw(photoSteps)), `"type":"image"`)
+
+	videoReply := &gotgbot.Message{MessageId: 884001, Date: 120,
+		Chat: gotgbot.Chat{Id: -910105, Type: "supergroup"}, From: user,
+		Video: &gotgbot.Video{FileId: "reply-video-file", FileUniqueId: "video-unique",
+			Duration: 10, FileSize: int64(len("video-bytes"))}}
+	videoCurrent := &gotgbot.Message{MessageId: 884002, Date: 123,
+		Chat: gotgbot.Chat{Id: -910105, Type: "supergroup"}, From: user,
+		Text: "summarize it", ReplyToMessage: videoReply}
+	videoSession := &GeminiSession{GeminiSession: q.GeminiSession{ID: 810105}, Provider: ProviderGemini}
+	require.NoError(t, videoSession.AddTgMessageWithReply(context.Background(), bot, videoCurrent))
+	require.Len(t, videoSession.TmpContents, 2)
+	require.Equal(t, "video", videoSession.TmpContents[0].MsgType)
+	require.Equal(t, []byte("video-bytes"), videoSession.TmpContents[0].Blob)
+	videoSteps, err := interactionStepsForContents(videoSession.TmpContents, nil)
+	require.NoError(t, err)
+	require.Contains(t, string(bytesJoinRaw(videoSteps)), `"type":"video"`)
+}
+
+func TestCaptionlessDeepSeekReplyVideoIsSkippedWithoutPersistenceFailure(t *testing.T) {
+	ctx := context.Background()
+	previousBot := mainBot
+	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot"}}
+	t.Cleanup(func() { mainBot = previousBot })
+	dbSession, err := g.Q.CreateNewGeminiSession(ctx, -910106, "deepseek reply video", "supergroup")
+	require.NoError(t, err)
+	user := &gotgbot.User{Id: 42, FirstName: "Alice"}
+	replied := &gotgbot.Message{MessageId: 885001, Date: 120,
+		Chat: gotgbot.Chat{Id: -910106, Type: "supergroup"}, From: user,
+		Video: &gotgbot.Video{FileId: "unused", FileUniqueId: "unused", Duration: 10, FileSize: 10}}
+	current := &gotgbot.Message{MessageId: 885002, Date: 123,
+		Chat: gotgbot.Chat{Id: -910106, Type: "supergroup"}, From: user,
+		Text: "continue", ReplyToMessage: replied}
+	session := &GeminiSession{GeminiSession: dbSession, Provider: ProviderDeepSeek, Model: ModelDeepSeekFlash}
+	require.NoError(t, session.AddTgMessageWithReply(ctx, nil, current))
+	require.Contains(t, session.TmpContextOnlyMsgIDs, int64(885001))
+	messages, err := session.ToDeepSeekMessages("system")
+	require.NoError(t, err)
+	require.Len(t, messages, 2)
+	require.Contains(t, messages[1].Content, "continue")
+	require.NoError(t, session.PersistTmpUpdates(ctx))
+	saved, err := g.Q.GetAllMsgInSession(ctx, dbSession.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, saved, 1)
+	require.Equal(t, int64(885002), saved[0].MsgID)
 }
 
 func TestPersistTmpUpdatesStoresBodyPayloadAndUsageAtomically(t *testing.T) {

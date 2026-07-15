@@ -9,6 +9,7 @@ import (
 	"main/globalcfg/q"
 	"main/helpers/azure"
 	"main/helpers/meilisearch"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -264,7 +265,7 @@ func InitConfig() {
 		_ = msgDb.Close()
 		msgDb = db
 	}
-	if err := initAIMetadataSchema(db); err != nil {
+	if err := runDatabaseMigrations(db); err != nil {
 		panic(err)
 	}
 	Q, err = q.PrepareWithLogger(context.Background(), db, nil)
@@ -319,16 +320,34 @@ func getSqliteConn(dbPath string) *sql.DB {
 			panic(e)
 		}
 	}
-	d, err := sql.Open("sqlite3", dbPath)
+	dsn := dbPath
+	if dbPath != ":memory:" {
+		u := &url.URL{Scheme: "file", Path: dbPath}
+		query := u.Query()
+		query.Set("_foreign_keys", "on")
+		query.Set("_busy_timeout", "5000")
+		query.Set("_journal_mode", "WAL")
+		query.Set("_synchronous", "NORMAL")
+		query.Set("_cache_size", "-32768")
+		u.RawQuery = query.Encode()
+		dsn = u.String()
+	}
+	d, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		panic(err)
 	}
-	check(d.Exec(`PRAGMA journal_mode=WAL;
-						PRAGMA wal_autocheckpoint=1000;
-						PRAGMA synchronous=NORMAL;
-						PRAGMA mmap_size=67108864; -- 64MB
-						PRAGMA cache_size = -32768; -- 32MB page cache
-						PRAGMA busy_timeout=5000;
+	if dbPath == ":memory:" {
+		d.SetMaxOpenConns(1)
+		d.SetMaxIdleConns(1)
+		check(d.Exec(`PRAGMA foreign_keys=ON;
+			PRAGMA busy_timeout=5000;
+			PRAGMA synchronous=NORMAL;`))
+	} else {
+		d.SetMaxOpenConns(4)
+		d.SetMaxIdleConns(4)
+	}
+	check(d.Exec(`PRAGMA wal_autocheckpoint=1000;
+						PRAGMA mmap_size=67108864;
 						PRAGMA optimize;`))
 	return d
 }

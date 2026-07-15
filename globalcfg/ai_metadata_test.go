@@ -57,7 +57,7 @@ VALUES (-1001, 0, 'time=%DATETIME_TZ% sender=%SENDER_NAME% quote=%QUOTE%');`)
 
 func TestAIMetadataMigrationAndUsagePersistence(t *testing.T) {
 	database := openAIMetadataTestDB(t)
-	require.NoError(t, initAIMetadataSchema(database))
+	require.NoError(t, runDatabaseMigrations(database))
 
 	enabled, err := getAIChatUsageEnabled(context.Background(), database, -1001)
 	require.NoError(t, err)
@@ -150,7 +150,7 @@ VALUES (7, 'gemini', 'gemini-3-flash-preview')`)
 
 func TestToggleAIChatUsageConcurrentIsolation(t *testing.T) {
 	database := openAIMetadataTestDB(t)
-	require.NoError(t, initAIMetadataSchema(database))
+	require.NoError(t, runDatabaseMigrations(database))
 
 	const toggles = 20
 	errCh := make(chan error, toggles)

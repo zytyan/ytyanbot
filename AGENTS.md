@@ -8,6 +8,8 @@ These instructions apply to the whole repository.
 - Add or change business SQL through sqlc. The project uses `/usr/local/bin/sqlc` v1.31.1.
 - Run `sqlc generate` after every schema or query change. Never edit generated sqlc files by hand.
 - Versioned DDL, connection PRAGMAs, SQLite Backup API operations, `VACUUM INTO`, and integrity checks are infrastructure exceptions; keep them in the migration or operations layer, not in handlers or business logic.
+- Register main-database migrations in `globalcfg/migrations.go` with a strictly increasing version, stable source checksum, and transactional runner. Mark large rewrites as offline so normal startup refuses to apply them.
+- Configure SQLite connection-wide behavior through the DSN or a connection hook so every pooled connection enables foreign keys and the same timeout/journal settings.
 - A SQL change is accepted only after a second `sqlc generate` is idempotent, targeted tests pass, `go test ./...` passes, and the project builds completely.
 
 ## Feature acceptance and Git workflow

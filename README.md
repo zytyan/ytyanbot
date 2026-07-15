@@ -164,6 +164,8 @@ npm run dev
 
 如果修改了 SQL schema 或 query，需要同步更新/重新生成对应 sqlc 产物，并补充相关测试。
 
+`/backupdb` 默认保持仅备份 SQLite 数据库的行为，Manifest 会将其标记为不完整的 AI 数据集。使用 `/backupdb?db=main&media=1`（或 `db=all`）会按一致的主库快照引用打包 `ai-media/` 内容寻址对象，同时写入 `media-manifest.tsv`、对象数量、总字节数和清单 SHA-256。完整媒体备份的最长执行时间可通过 `GOYTYAN_BACKUP_MAX_DURATION` 配置（Go duration 格式，默认 `30m`），客户端取消请求也会终止备份。
+
 ## 开发提示
 
 - 根目录 `README.md` 介绍整体项目；`http/frontend/README.md` 是前端脚手架说明。

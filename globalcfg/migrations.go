@@ -2,10 +2,10 @@ package g
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
+	"main/globalcfg/migrationdefs"
 )
 
 const migrationTableSQL = `
@@ -15,23 +15,6 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     checksum TEXT NOT NULL,
     applied_at INTEGER NOT NULL
 ) STRICT;`
-
-const aiMetadataBaselineSource = `
-ai metadata baseline v1
-- create ai_chat_models, ai_session_meta, and ai_message_meta when absent
-- add show_usage to ai_chat_models
-- add chat_id, token counters, input window, and assistant payload columns to ai_message_meta
-- add interaction, explicit cache, and lossy rebuild columns to ai_session_meta
-- backfill ai_message_meta.chat_id from gemini_contents
-- replace unstable legacy system prompt variables
-- create the unique chat/message usage lookup index
-`
-
-const removeLegacyAIMemorySource = `
-remove legacy ai memory v2
-- remove the deprecated %MEMORIES% placeholder from saved system prompts
-- drop gemini_memories and its index
-`
 
 const aiMetadataSchema = `
 CREATE TABLE IF NOT EXISTS ai_chat_models (
@@ -88,19 +71,26 @@ var mainDatabaseMigrations = []databaseMigration{
 	{
 		version: 1,
 		name:    "ai_metadata_baseline",
-		source:  aiMetadataBaselineSource,
+		source:  migrationdefs.AIMetadataBaselineSource,
 		run:     migrateAIMetadataBaseline,
 	},
 	{
 		version: 2,
 		name:    "remove_legacy_ai_memory",
-		source:  removeLegacyAIMemorySource,
+		source:  migrationdefs.RemoveLegacyAIMemorySource,
 		run:     migrateRemoveLegacyAIMemory,
+	},
+	{
+		version: 3,
+		name:    "generic_ai_v2",
+		source:  migrationdefs.AIV2OfflineSource,
+		offline: true,
+		run:     func(context.Context, *sql.Tx) error { return nil },
 	},
 }
 
 func migrationChecksum(source string) string {
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(source)))
+	return migrationdefs.Checksum(source)
 }
 
 func runDatabaseMigrations(database *sql.DB) error {

@@ -183,6 +183,51 @@ func (q *Queries) CreateAISession(ctx context.Context, arg CreateAISessionParams
 	return i, err
 }
 
+const createMigratedAISession = `-- name: CreateMigratedAISession :exec
+INSERT INTO ai_sessions(id, chat_id, topic_id, chat_name, chat_type, status, provider, model,
+                        created_at, updated_at, total_input_tokens, total_output_tokens,
+                        total_cached_input_tokens, history_rebuild_lossy)
+VALUES (?1, ?2, NULL, ?3, ?4,
+        ?5, ?6, ?7, ?8,
+        ?9, ?10, ?11,
+        ?12, ?13)
+`
+
+type CreateMigratedAISessionParams struct {
+	ID                     int64  `json:"id"`
+	ChatID                 int64  `json:"chat_id"`
+	ChatName               string `json:"chat_name"`
+	ChatType               string `json:"chat_type"`
+	Status                 string `json:"status"`
+	Provider               string `json:"provider"`
+	Model                  string `json:"model"`
+	CreatedAt              int64  `json:"created_at"`
+	UpdatedAt              int64  `json:"updated_at"`
+	TotalInputTokens       int64  `json:"total_input_tokens"`
+	TotalOutputTokens      int64  `json:"total_output_tokens"`
+	TotalCachedInputTokens int64  `json:"total_cached_input_tokens"`
+	HistoryRebuildLossy    int64  `json:"history_rebuild_lossy"`
+}
+
+func (q *Queries) CreateMigratedAISession(ctx context.Context, arg CreateMigratedAISessionParams) error {
+	_, err := q.exec(ctx, q.createMigratedAISessionStmt, createMigratedAISession,
+		arg.ID,
+		arg.ChatID,
+		arg.ChatName,
+		arg.ChatType,
+		arg.Status,
+		arg.Provider,
+		arg.Model,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+		arg.TotalInputTokens,
+		arg.TotalOutputTokens,
+		arg.TotalCachedInputTokens,
+		arg.HistoryRebuildLossy,
+	)
+	return err
+}
+
 const deleteAISessionProviderState = `-- name: DeleteAISessionProviderState :exec
 DELETE FROM ai_session_provider_state WHERE session_id=?
 `
@@ -235,6 +280,57 @@ func (q *Queries) GetAIMessage(ctx context.Context, chatID int64, msgID int64) (
 		&i.MsgType,
 		&i.Text,
 		&i.ReplyToMsgID,
+	)
+	return i, err
+}
+
+const getAIMigrationStats = `-- name: GetAIMigrationStats :one
+SELECT
+  CAST((SELECT COUNT(*) FROM ai_sessions) AS INTEGER) AS sessions,
+  CAST((SELECT COUNT(*) FROM ai_messages) AS INTEGER) AS messages,
+  CAST((SELECT COUNT(*) FROM ai_session_messages) AS INTEGER) AS session_messages,
+  CAST((SELECT COUNT(*) FROM ai_runs) AS INTEGER) AS runs,
+  CAST((SELECT COUNT(*) FROM ai_system_prompts) AS INTEGER) AS prompts,
+  CAST((SELECT COUNT(*) FROM ai_chat_settings) AS INTEGER) AS chat_settings,
+  CAST((SELECT COUNT(*) FROM media_objects) AS INTEGER) AS media_objects,
+  CAST((SELECT COUNT(*) FROM ai_message_media) AS INTEGER) AS media_references,
+  CAST((SELECT COUNT(*) FROM ai_runs WHERE length(assistant_payload) > 0) AS INTEGER) AS assistant_payloads,
+  CAST(COALESCE((SELECT SUM(total_input_tokens) FROM ai_sessions), 0) AS INTEGER) AS input_tokens,
+  CAST(COALESCE((SELECT SUM(total_output_tokens) FROM ai_sessions), 0) AS INTEGER) AS output_tokens,
+  CAST(COALESCE((SELECT SUM(total_cached_input_tokens) FROM ai_sessions), 0) AS INTEGER) AS cached_input_tokens
+`
+
+type GetAIMigrationStatsRow struct {
+	Sessions          int64 `json:"sessions"`
+	Messages          int64 `json:"messages"`
+	SessionMessages   int64 `json:"session_messages"`
+	Runs              int64 `json:"runs"`
+	Prompts           int64 `json:"prompts"`
+	ChatSettings      int64 `json:"chat_settings"`
+	MediaObjects      int64 `json:"media_objects"`
+	MediaReferences   int64 `json:"media_references"`
+	AssistantPayloads int64 `json:"assistant_payloads"`
+	InputTokens       int64 `json:"input_tokens"`
+	OutputTokens      int64 `json:"output_tokens"`
+	CachedInputTokens int64 `json:"cached_input_tokens"`
+}
+
+func (q *Queries) GetAIMigrationStats(ctx context.Context) (GetAIMigrationStatsRow, error) {
+	row := q.queryRow(ctx, q.getAIMigrationStatsStmt, getAIMigrationStats)
+	var i GetAIMigrationStatsRow
+	err := row.Scan(
+		&i.Sessions,
+		&i.Messages,
+		&i.SessionMessages,
+		&i.Runs,
+		&i.Prompts,
+		&i.ChatSettings,
+		&i.MediaObjects,
+		&i.MediaReferences,
+		&i.AssistantPayloads,
+		&i.InputTokens,
+		&i.OutputTokens,
+		&i.CachedInputTokens,
 	)
 	return i, err
 }
@@ -845,6 +941,21 @@ func (q *Queries) MarkAIRunGenerated(ctx context.Context, arg MarkAIRunGenerated
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const recordSchemaMigration = `-- name: RecordSchemaMigration :exec
+INSERT INTO schema_migrations(version, name, checksum, applied_at)
+VALUES (?, ?, ?, ?)
+`
+
+func (q *Queries) RecordSchemaMigration(ctx context.Context, version int64, name string, checksum string, appliedAt int64) error {
+	_, err := q.exec(ctx, q.recordSchemaMigrationStmt, recordSchemaMigration,
+		version,
+		name,
+		checksum,
+		appliedAt,
+	)
+	return err
 }
 
 const setAIChatModelSetting = `-- name: SetAIChatModelSetting :one

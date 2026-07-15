@@ -34,6 +34,15 @@ VALUES (sqlc.arg(chat_id), sqlc.narg(topic_id), sqlc.arg(chat_name), sqlc.arg(ch
         sqlc.arg(provider), sqlc.arg(model), sqlc.arg(created_at), sqlc.arg(updated_at))
 RETURNING *;
 
+-- name: CreateMigratedAISession :exec
+INSERT INTO ai_sessions(id, chat_id, topic_id, chat_name, chat_type, status, provider, model,
+                        created_at, updated_at, total_input_tokens, total_output_tokens,
+                        total_cached_input_tokens, history_rebuild_lossy)
+VALUES (sqlc.arg(id), sqlc.arg(chat_id), NULL, sqlc.arg(chat_name), sqlc.arg(chat_type),
+        sqlc.arg(status), sqlc.arg(provider), sqlc.arg(model), sqlc.arg(created_at),
+        sqlc.arg(updated_at), sqlc.arg(total_input_tokens), sqlc.arg(total_output_tokens),
+        sqlc.arg(total_cached_input_tokens), sqlc.arg(history_rebuild_lossy));
+
 -- name: GetAISession :one
 SELECT * FROM ai_sessions WHERE id = ?;
 
@@ -209,3 +218,22 @@ SELECT prompt FROM ai_system_prompts WHERE chat_id=? AND topic_id=?;
 
 -- name: DeleteAISystemPrompt :exec
 DELETE FROM ai_system_prompts WHERE chat_id=? AND topic_id=?;
+
+-- name: RecordSchemaMigration :exec
+INSERT INTO schema_migrations(version, name, checksum, applied_at)
+VALUES (?, ?, ?, ?);
+
+-- name: GetAIMigrationStats :one
+SELECT
+  CAST((SELECT COUNT(*) FROM ai_sessions) AS INTEGER) AS sessions,
+  CAST((SELECT COUNT(*) FROM ai_messages) AS INTEGER) AS messages,
+  CAST((SELECT COUNT(*) FROM ai_session_messages) AS INTEGER) AS session_messages,
+  CAST((SELECT COUNT(*) FROM ai_runs) AS INTEGER) AS runs,
+  CAST((SELECT COUNT(*) FROM ai_system_prompts) AS INTEGER) AS prompts,
+  CAST((SELECT COUNT(*) FROM ai_chat_settings) AS INTEGER) AS chat_settings,
+  CAST((SELECT COUNT(*) FROM media_objects) AS INTEGER) AS media_objects,
+  CAST((SELECT COUNT(*) FROM ai_message_media) AS INTEGER) AS media_references,
+  CAST((SELECT COUNT(*) FROM ai_runs WHERE length(assistant_payload) > 0) AS INTEGER) AS assistant_payloads,
+  CAST(COALESCE((SELECT SUM(total_input_tokens) FROM ai_sessions), 0) AS INTEGER) AS input_tokens,
+  CAST(COALESCE((SELECT SUM(total_output_tokens) FROM ai_sessions), 0) AS INTEGER) AS output_tokens,
+  CAST(COALESCE((SELECT SUM(total_cached_input_tokens) FROM ai_sessions), 0) AS INTEGER) AS cached_input_tokens;

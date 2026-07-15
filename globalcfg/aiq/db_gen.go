@@ -39,6 +39,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.createAISessionStmt, err = db.PrepareContext(ctx, createAISession); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateAISession: %w", err)
 	}
+	if q.createMigratedAISessionStmt, err = db.PrepareContext(ctx, createMigratedAISession); err != nil {
+		return nil, fmt.Errorf("error preparing query CreateMigratedAISession: %w", err)
+	}
 	if q.deleteAISessionProviderStateStmt, err = db.PrepareContext(ctx, deleteAISessionProviderState); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteAISessionProviderState: %w", err)
 	}
@@ -50,6 +53,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.getAIMessageStmt, err = db.PrepareContext(ctx, getAIMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAIMessage: %w", err)
+	}
+	if q.getAIMigrationStatsStmt, err = db.PrepareContext(ctx, getAIMigrationStats); err != nil {
+		return nil, fmt.Errorf("error preparing query GetAIMigrationStats: %w", err)
 	}
 	if q.getAIRunStmt, err = db.PrepareContext(ctx, getAIRun); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAIRun: %w", err)
@@ -111,6 +117,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.markAIRunGeneratedStmt, err = db.PrepareContext(ctx, markAIRunGenerated); err != nil {
 		return nil, fmt.Errorf("error preparing query MarkAIRunGenerated: %w", err)
 	}
+	if q.recordSchemaMigrationStmt, err = db.PrepareContext(ctx, recordSchemaMigration); err != nil {
+		return nil, fmt.Errorf("error preparing query RecordSchemaMigration: %w", err)
+	}
 	if q.setAIChatModelSettingStmt, err = db.PrepareContext(ctx, setAIChatModelSetting); err != nil {
 		return nil, fmt.Errorf("error preparing query SetAIChatModelSetting: %w", err)
 	}
@@ -165,6 +174,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing createAISessionStmt: %w", cerr)
 		}
 	}
+	if q.createMigratedAISessionStmt != nil {
+		if cerr := q.createMigratedAISessionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing createMigratedAISessionStmt: %w", cerr)
+		}
+	}
 	if q.deleteAISessionProviderStateStmt != nil {
 		if cerr := q.deleteAISessionProviderStateStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteAISessionProviderStateStmt: %w", cerr)
@@ -183,6 +197,11 @@ func (q *Queries) Close() error {
 	if q.getAIMessageStmt != nil {
 		if cerr := q.getAIMessageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getAIMessageStmt: %w", cerr)
+		}
+	}
+	if q.getAIMigrationStatsStmt != nil {
+		if cerr := q.getAIMigrationStatsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getAIMigrationStatsStmt: %w", cerr)
 		}
 	}
 	if q.getAIRunStmt != nil {
@@ -285,6 +304,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing markAIRunGeneratedStmt: %w", cerr)
 		}
 	}
+	if q.recordSchemaMigrationStmt != nil {
+		if cerr := q.recordSchemaMigrationStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing recordSchemaMigrationStmt: %w", cerr)
+		}
+	}
 	if q.setAIChatModelSettingStmt != nil {
 		if cerr := q.setAIChatModelSettingStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing setAIChatModelSettingStmt: %w", cerr)
@@ -369,10 +393,12 @@ type Queries struct {
 	clearAISessionHistoryRebuildLossyStmt *sql.Stmt
 	createAIRunStmt                       *sql.Stmt
 	createAISessionStmt                   *sql.Stmt
+	createMigratedAISessionStmt           *sql.Stmt
 	deleteAISessionProviderStateStmt      *sql.Stmt
 	deleteAISystemPromptStmt              *sql.Stmt
 	getAIChatSettingsStmt                 *sql.Stmt
 	getAIMessageStmt                      *sql.Stmt
+	getAIMigrationStatsStmt               *sql.Stmt
 	getAIRunStmt                          *sql.Stmt
 	getAIRunByRequestStmt                 *sql.Stmt
 	getAIRunByResponseStmt                *sql.Stmt
@@ -393,6 +419,7 @@ type Queries struct {
 	markAIRunDeliveredStmt                *sql.Stmt
 	markAIRunFailedStmt                   *sql.Stmt
 	markAIRunGeneratedStmt                *sql.Stmt
+	recordSchemaMigrationStmt             *sql.Stmt
 	setAIChatModelSettingStmt             *sql.Stmt
 	setAISessionModelStmt                 *sql.Stmt
 	setAISessionStatusStmt                *sql.Stmt
@@ -412,10 +439,12 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		clearAISessionHistoryRebuildLossyStmt: q.clearAISessionHistoryRebuildLossyStmt,
 		createAIRunStmt:                       q.createAIRunStmt,
 		createAISessionStmt:                   q.createAISessionStmt,
+		createMigratedAISessionStmt:           q.createMigratedAISessionStmt,
 		deleteAISessionProviderStateStmt:      q.deleteAISessionProviderStateStmt,
 		deleteAISystemPromptStmt:              q.deleteAISystemPromptStmt,
 		getAIChatSettingsStmt:                 q.getAIChatSettingsStmt,
 		getAIMessageStmt:                      q.getAIMessageStmt,
+		getAIMigrationStatsStmt:               q.getAIMigrationStatsStmt,
 		getAIRunStmt:                          q.getAIRunStmt,
 		getAIRunByRequestStmt:                 q.getAIRunByRequestStmt,
 		getAIRunByResponseStmt:                q.getAIRunByResponseStmt,
@@ -436,6 +465,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		markAIRunDeliveredStmt:                q.markAIRunDeliveredStmt,
 		markAIRunFailedStmt:                   q.markAIRunFailedStmt,
 		markAIRunGeneratedStmt:                q.markAIRunGeneratedStmt,
+		recordSchemaMigrationStmt:             q.recordSchemaMigrationStmt,
 		setAIChatModelSettingStmt:             q.setAIChatModelSettingStmt,
 		setAISessionModelStmt:                 q.setAISessionModelStmt,
 		setAISessionStatusStmt:                q.setAISessionStatusStmt,

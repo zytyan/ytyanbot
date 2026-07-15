@@ -90,3 +90,17 @@ sql:
         emit_json_tags: true
         query_parameter_limit: 4
         emit_prepared_queries: true
+  - engine: "sqlite"
+    queries:
+      - "sql/migrate/query_ai_v1.sql"
+    schema:
+      - "sql/migrate/schema_ai_v1.sql"
+    gen:
+      go:
+        package: "legacyq"
+        out: "internal/aidbmigrate/legacyq"
+        output_files_suffix: "_gen"
+        output_db_file_name: "db_gen.go"
+        output_models_file_name: "models_gen.go"
+        emit_json_tags: true
+        query_parameter_limit: 4

@@ -2,6 +2,7 @@ package g
 
 import (
 	"database/sql"
+	"main/globalcfg/migrationdefs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,14 @@ func initMainDatabaseInMemory(database *sql.DB) {
 			panic(err)
 		}
 		_, err = database.Exec(string(data))
+		if err != nil {
+			panic(err)
+		}
+	}
+	for _, definition := range migrationdefs.All {
+		_, err = database.Exec(`INSERT INTO schema_migrations(version, name, checksum, applied_at)
+VALUES (?, ?, ?, unixepoch())`, definition.Version, definition.Name,
+			migrationdefs.Checksum(definition.Source))
 		if err != nil {
 			panic(err)
 		}

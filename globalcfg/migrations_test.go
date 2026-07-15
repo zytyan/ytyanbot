@@ -69,6 +69,13 @@ SELECT 1 FROM sqlite_master WHERE type='table' AND name='rolled_back')`).Scan(&e
 		"requires the offline migration tool")
 }
 
+func TestMainDatabaseV3RequiresOfflineMigrationTool(t *testing.T) {
+	database := openMigrationTestDB(t)
+	err := applyDatabaseMigrations(context.Background(), database, mainDatabaseMigrations[2:])
+	require.ErrorContains(t, err, "generic_ai_v2")
+	require.ErrorContains(t, err, "requires the offline migration tool")
+}
+
 func TestSQLitePoolConnectionPragmas(t *testing.T) {
 	database := getSqliteConn(filepath.Join(t.TempDir(), "pool.db"))
 	t.Cleanup(func() { require.NoError(t, database.Close()) })

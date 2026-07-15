@@ -166,6 +166,19 @@ npm run dev
 
 `/backupdb` 默认保持仅备份 SQLite 数据库的行为，Manifest 会将其标记为不完整的 AI 数据集。使用 `/backupdb?db=main&media=1`（或 `db=all`）会按一致的主库快照引用打包 `ai-media/` 内容寻址对象，同时写入 `media-manifest.tsv`、对象数量、总字节数和清单 SHA-256。完整媒体备份的最长执行时间可通过 `GOYTYAN_BACKUP_MAX_DURATION` 配置（Go duration 格式，默认 `30m`），客户端取消请求也会终止备份。
 
+AI V1 → V2 必须使用离线工具，候选程序会拒绝直接打开尚未完成 V3 迁移的旧库：
+
+```bash
+go build -o /tmp/ai-db-migrate ./cmd/ai-db-migrate
+/tmp/ai-db-migrate \
+  -source /path/to/source.db \
+  -output /path/to/new.db \
+  -media /path/to/new-ai-media \
+  -manifest /path/to/migration-manifest.json
+```
+
+工具仅以只读方式打开源库，先通过 SQLite Backup API 创建 staging 副本；迁移、旧 AI 表删除和 `VACUUM INTO` 均发生在副本上。目标数据库、媒体目录和 Manifest 必须预先不存在。正式迁移前必须停止写入并另做可回滚备份；工具生成后仍需检查 Manifest、`integrity_check`、外键、媒体哈希和业务验收，再执行原子切换。
+
 ## 开发提示
 
 - 根目录 `README.md` 介绍整体项目；`http/frontend/README.md` 是前端脚手架说明。

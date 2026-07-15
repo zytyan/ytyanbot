@@ -3,6 +3,7 @@
 /main.exe
 /.cache
 /build
+/ai-media
 /main
 __pycache__
 *.db

@@ -64,6 +64,7 @@ YTYAN_CONFIG_FILE=/path/to/config.yaml go run .
 - `tg-api-url`：Telegram Bot API 地址，例如本地 `telegram-bot-api` 服务。
 - `save-message`：是否保存群消息。
 - `database-path`：主 SQLite 数据库路径。
+- `ai-media-path`：AI 多媒体内容寻址目录；默认位于主数据库旁的 `ai-media/`。
 - `msg-db-path`：消息归档 SQLite 数据库路径。
 - `meili-wal-db-path`：MeiliSearch 写入失败时使用的本地 WAL 数据库。
 - `meili-config`：MeiliSearch 地址、索引名、主键和 master key。

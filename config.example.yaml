@@ -34,6 +34,7 @@ meili-config:
 
 log-level: -1
 database-path: ":memory:"
+ai-media-path: "ai-media"
 msg-db-path: ":memory:"
 meili-wal-db-path: "meili-wal.db"
 meili-wal-batch-size: 500

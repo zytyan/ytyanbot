@@ -56,6 +56,7 @@ type Config struct {
 	DropPendingUpdates  bool        `koanf:"drop-pending-updates"`
 	LogLevel            int8        `koanf:"log-level"`
 	DatabasePath        string      `koanf:"database-path"`
+	AIMediaPath         string      `koanf:"ai-media-path"`
 	GeminiKey           string      `koanf:"gemini-key"`
 	GeminiExplicitCache *bool       `koanf:"gemini-explicit-cache"`
 	DeepSeekKey         string      `koanf:"deepseek-key"`
@@ -203,6 +204,13 @@ func normalizeConfig(cfg *Config) {
 	if cfg.BackendAddr == "" {
 		cfg.BackendAddr = DefaultBackendAddr
 	}
+	if cfg.AIMediaPath == "" {
+		if cfg.DatabasePath == "" || cfg.DatabasePath == ":memory:" {
+			cfg.AIMediaPath = "ai-media"
+		} else {
+			cfg.AIMediaPath = filepath.Join(filepath.Dir(cfg.DatabasePath), "ai-media")
+		}
+	}
 }
 
 func getCfgFilename() string {
@@ -235,10 +243,12 @@ func InitConfig() {
 			return
 		}
 		oldCfg := config.Load()
-		if oldCfg.DatabasePath != cfg2.DatabasePath || oldCfg.MsgDbPath != cfg2.MsgDbPath || oldCfg.MeiliWalDbPath != cfg2.MeiliWalDbPath {
+		if oldCfg.DatabasePath != cfg2.DatabasePath || oldCfg.MsgDbPath != cfg2.MsgDbPath ||
+			oldCfg.MeiliWalDbPath != cfg2.MeiliWalDbPath || oldCfg.AIMediaPath != cfg2.AIMediaPath {
 			log.Printf("database path cannot be changed without restart, old: %s, new: %s", oldCfg.DatabasePath, cfg2.DatabasePath)
 			log.Printf("message database path cannot be changed without restart, old: %s, new: %s", oldCfg.MsgDbPath, cfg2.MsgDbPath)
 			log.Printf("meili wal database path cannot be changed without restart, old: %s, new: %s", oldCfg.MeiliWalDbPath, cfg2.MeiliWalDbPath)
+			log.Printf("AI media path cannot be changed without restart, old: %s, new: %s", oldCfg.AIMediaPath, cfg2.AIMediaPath)
 			return
 		}
 		config.Store(cfg2)

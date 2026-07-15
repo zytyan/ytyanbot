@@ -374,6 +374,10 @@ func interactionGenerationConfig(config *genai.GenerateContentConfig) map[string
 	if config.ThinkingConfig != nil && config.ThinkingConfig.IncludeThoughts {
 		result["thinking_summaries"] = "auto"
 	}
+	if config.ThinkingConfig != nil && config.ThinkingConfig.ThinkingLevel != "" &&
+		config.ThinkingConfig.ThinkingLevel != genai.ThinkingLevelUnspecified {
+		result["thinking_level"] = strings.ToLower(string(config.ThinkingConfig.ThinkingLevel))
+	}
 	return result
 }
 

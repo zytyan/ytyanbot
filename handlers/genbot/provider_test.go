@@ -537,6 +537,24 @@ func TestModelKeyboardMarksCurrent(t *testing.T) {
 	require.Equal(t, ModelGeminiFlash, legacyModel)
 }
 
+func TestGemini3FlashDefaultsToLowThinkingWithoutOverridingExplicitLevel(t *testing.T) {
+	flashConfig := &genai.GenerateContentConfig{}
+	configureGeminiThinking(ModelGeminiFlash, flashConfig)
+	require.True(t, flashConfig.ThinkingConfig.IncludeThoughts)
+	require.Equal(t, genai.ThinkingLevelLow, flashConfig.ThinkingConfig.ThinkingLevel)
+
+	liteConfig := &genai.GenerateContentConfig{}
+	configureGeminiThinking(ModelGeminiFlashLite, liteConfig)
+	require.True(t, liteConfig.ThinkingConfig.IncludeThoughts)
+	require.Empty(t, liteConfig.ThinkingConfig.ThinkingLevel)
+
+	explicitConfig := &genai.GenerateContentConfig{ThinkingConfig: &genai.ThinkingConfig{
+		ThinkingLevel: genai.ThinkingLevelHigh,
+	}}
+	configureGeminiThinking(ModelGeminiFlash, explicitConfig)
+	require.Equal(t, genai.ThinkingLevelHigh, explicitConfig.ThinkingConfig.ThinkingLevel)
+}
+
 func TestPrivateChatCanChangeModel(t *testing.T) {
 	ok, err := canChangeModel(&gotgbot.Bot{}, &gotgbot.Chat{Type: "private"}, 42)
 	require.NoError(t, err)

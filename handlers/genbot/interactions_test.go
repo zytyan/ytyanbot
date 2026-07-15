@@ -50,7 +50,7 @@ func TestGeminiInteractionStatefulRequestAndRawSteps(t *testing.T) {
 	}
 	config := &genai.GenerateContentConfig{Tools: []*genai.Tool{{
 		GoogleSearch: &genai.GoogleSearch{}, CodeExecution: &genai.ToolCodeExecution{},
-	}}, ThinkingConfig: &genai.ThinkingConfig{IncludeThoughts: true}}
+	}}, ThinkingConfig: &genai.ThinkingConfig{IncludeThoughts: true, ThinkingLevel: genai.ThinkingLevelLow}}
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		require.Equal(t, "secret", request.Header.Get("x-goog-api-key"))
 		require.Equal(t, geminiInteractionsRevision, request.Header.Get("Api-Revision"))
@@ -61,6 +61,7 @@ func TestGeminiInteractionStatefulRequestAndRawSteps(t *testing.T) {
 		require.Equal(t, "system", payload.SystemInstruction)
 		require.Len(t, payload.Tools, 2)
 		require.Equal(t, "auto", payload.GenerationConfig["thinking_summaries"])
+		require.Equal(t, "low", payload.GenerationConfig["thinking_level"])
 		require.Len(t, payload.Input, 1, "stateful requests only send the current user turn")
 		require.Contains(t, string(payload.Input[0]), "current")
 		require.NotContains(t, string(payload.Input[0]), "old answer")

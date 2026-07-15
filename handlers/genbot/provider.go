@@ -84,6 +84,17 @@ func providerForModel(model string) string {
 	return ProviderGemini
 }
 
+func configureGeminiThinking(model string, config *genai.GenerateContentConfig) {
+	if config.ThinkingConfig == nil {
+		config.ThinkingConfig = &genai.ThinkingConfig{}
+	}
+	config.ThinkingConfig.IncludeThoughts = true
+	if model == ModelGeminiFlash && (config.ThinkingConfig.ThinkingLevel == "" ||
+		config.ThinkingConfig.ThinkingLevel == genai.ThinkingLevelUnspecified) {
+		config.ThinkingConfig.ThinkingLevel = genai.ThinkingLevelLow
+	}
+}
+
 func generateAI(ctx context.Context, session *GeminiSession, systemPrompt string, geminiConfig *genai.GenerateContentConfig) (*AIResult, error) {
 	window := session.prepareRequestWindow()
 	var result *AIResult
@@ -91,10 +102,7 @@ func generateAI(ctx context.Context, session *GeminiSession, systemPrompt string
 	if session.Provider == ProviderDeepSeek {
 		result, err = generateDeepSeek(ctx, session, systemPrompt, window)
 	} else {
-		if geminiConfig.ThinkingConfig == nil {
-			geminiConfig.ThinkingConfig = &genai.ThinkingConfig{}
-		}
-		geminiConfig.ThinkingConfig.IncludeThoughts = true
+		configureGeminiThinking(session.Model, geminiConfig)
 		result, err = generateGeminiWithInteractions(ctx, session, systemPrompt, geminiConfig, window)
 	}
 	if result != nil {

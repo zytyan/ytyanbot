@@ -105,7 +105,12 @@ var replaceMetaVar = map[string]func(ctx *ReplaceCtx) string{
 }
 
 type Replacer struct {
-	replaceFunc []func(ctx *ReplaceCtx) string
+	replaceFunc   []func(ctx *ReplaceCtx) string
+	needsMemories bool
+}
+
+func (r *Replacer) NeedsMemories() bool {
+	return r != nil && r.needsMemories
 }
 
 func (r *Replacer) Replace(ctx *ReplaceCtx) string {
@@ -146,6 +151,7 @@ func NewReplacer(tpl string) Replacer {
 	}
 	partsLen := strings.Count(tpl, "%")/2 + 1
 	parts := make([]func(ctx *ReplaceCtx) string, 0, partsLen)
+	needsMemories := false
 
 	emitConst := func(s string) {
 		if s == "" {
@@ -217,6 +223,9 @@ func NewReplacer(tpl string) Replacer {
 		// 合法变量名：查白名单
 		if fn, ok := replaceMetaVar[varName]; ok {
 			parts = append(parts, fn)
+			if varName == "MEMORIES" {
+				needsMemories = true
+			}
 		} else {
 			// 未知变量：保留原样，便于用户发现写错
 			raw := tpl[i : j+1]
@@ -232,5 +241,5 @@ func NewReplacer(tpl string) Replacer {
 		emitConst(tpl[lastText:])
 	}
 
-	return Replacer{replaceFunc: parts}
+	return Replacer{replaceFunc: parts, needsMemories: needsMemories}
 }

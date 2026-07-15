@@ -47,7 +47,8 @@ func getGenAiClient() *genai.Client {
 }
 
 const (
-	geminiSessionContentLimit = 500
+	geminiSessionContentLimit = 200
+	geminiSessionWindowStep   = 50
 	geminiMemoriesLimit       = 60
 )
 
@@ -123,15 +124,16 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 	if session == nil {
 		return nil
 	}
-	if len(session.Memories) == 0 {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	promptReplacer := getSysPrompt(msg)
+	if promptReplacer.NeedsMemories() && len(session.Memories) == 0 {
 		memories, err := g.Q.ListGeminiMemory(genCtx, topic.chatId, topic.topicId, 30)
 		if err != nil {
 			return err
 		}
 		session.Memories = memories
 	}
-	session.mu.Lock()
-	defer session.mu.Unlock()
 	setReaction(bot, msg, "👀")
 
 	sysPromptCtx := ReplaceCtx{
@@ -143,14 +145,14 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 	for _, mem := range session.Memories {
 		sysPromptCtx.Memories = append(sysPromptCtx.Memories, mem.Content)
 	}
-	sysPrompt := getSysPrompt(msg).Replace(&sysPromptCtx)
+	sysPrompt := promptReplacer.Replace(&sysPromptCtx)
 	config := &genai.GenerateContentConfig{
 		Tools: []*genai.Tool{
 			{GoogleSearch: &genai.GoogleSearch{}},
 		},
 		ThinkingConfig: &genai.ThinkingConfig{IncludeThoughts: true},
 	}
-	if err := session.AddTgMessage(bot, ctx.EffectiveMessage); err != nil {
+	if err := session.AddTgMessageWithReply(genCtx, bot, ctx.EffectiveMessage); err != nil {
 		return err
 	}
 	if session.AllowCodeExecution {
@@ -222,6 +224,12 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 }
 
 func generateGemini(ctx context.Context, session *GeminiSession, config *genai.GenerateContentConfig) (res *genai.GenerateContentResponse, err error) {
+	return generateGeminiContents(ctx, session.Model, session.ToGenaiContents(), config)
+}
+
+func generateGeminiContents(ctx context.Context, model string, contents []*genai.Content,
+	config *genai.GenerateContentConfig,
+) (res *genai.GenerateContentResponse, err error) {
 	client := getGenAiClient()
 	base := 3.0
 	jitter := 0.1
@@ -258,7 +266,7 @@ func generateGemini(ctx context.Context, session *GeminiSession, config *genai.G
 			err = ctx.Err()
 			break
 		}
-		res, err = client.Models.GenerateContent(ctx, session.Model, session.ToGenaiContents(), config)
+		res, err = client.Models.GenerateContent(ctx, model, contents, config)
 		if err != nil {
 			wait()
 			continue

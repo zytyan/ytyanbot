@@ -58,6 +58,28 @@ func TestDeepSeekPureVideoRejected(t *testing.T) {
 	require.ErrorIs(t, err, ErrDeepSeekVideoOnly)
 }
 
+func TestDeepSeekLossyHistoryUsesPortableText(t *testing.T) {
+	photo := testContent("photo", "caption")
+	photo.MsgID = 1
+	answer := testContent("text", "portable answer")
+	answer.MsgID = 2
+	answer.Role = genai.RoleModel
+	session := &GeminiSession{
+		Contents: []q.GeminiContent{photo, answer}, HistoryRebuildLossy: true,
+		AssistantPayloads: map[int64]g.AIAssistantPayload{2: {
+			MsgID: 2, Provider: ProviderDeepSeek, Format: PayloadFormatDeepSeekMessage,
+			Payload: []byte(`{"role":"assistant","content":"raw answer","reasoning_content":"encrypted thought","tool_calls":[{"id":"call"}]}`),
+		}},
+	}
+	messages, err := session.ToDeepSeekMessages("system")
+	require.NoError(t, err)
+	require.Len(t, messages, 3)
+	require.Contains(t, messages[1].Content, "[图片]")
+	require.Equal(t, "portable answer", messages[2].Content)
+	require.Empty(t, messages[2].ReasoningContent)
+	require.Empty(t, messages[2].ToolCalls)
+}
+
 func TestCallDeepSeek(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		require.Equal(t, "/chat/completions", r.URL.Path)
@@ -186,37 +208,89 @@ func TestDamagedAssistantPayloadFallsBackToSavedBody(t *testing.T) {
 	require.Equal(t, "safe fallback", deepSeekMessage.Content)
 }
 
-func TestAddTgMessageDoesNotPersistReplyMetadata(t *testing.T) {
+func TestAddTgMessageWithReplyAppendsReplyFirstWithoutLegacyLabels(t *testing.T) {
 	previousBot := mainBot
 	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot"}}
 	t.Cleanup(func() { mainBot = previousBot })
 	user := &gotgbot.User{Id: 42, FirstName: "Alice", Username: "alice"}
 	message := &gotgbot.Message{
-		MessageId: 101,
+		MessageId: 880102,
 		Date:      123,
-		Chat:      gotgbot.Chat{Id: -1001, Type: "supergroup"},
+		Chat:      gotgbot.Chat{Id: -910101, Type: "supergroup"},
 		From:      user,
 		Text:      "hello",
 		ReplyToMessage: &gotgbot.Message{
-			MessageId: 88,
+			MessageId: 880101,
 			From:      &gotgbot.User{Id: 7, FirstName: "Bob"},
+			Text:      "earlier message",
 		},
 		Quote: &gotgbot.TextQuote{Text: "quoted", IsManual: true},
 	}
 	session := &GeminiSession{GeminiSession: q.GeminiSession{ID: 5}}
-	require.NoError(t, session.AddTgMessage(nil, message))
-	require.Len(t, session.TmpContents, 1)
-	saved := session.TmpContents[0]
+	require.NoError(t, session.AddTgMessageWithReply(context.Background(), nil, message))
+	require.Len(t, session.TmpContents, 2)
+	require.Equal(t, int64(880101), session.TmpContents[0].MsgID)
+	require.Equal(t, "earlier message", session.TmpContents[0].Text.String)
+	require.Equal(t, int64(880102), session.TmpContents[1].MsgID)
+	saved := session.TmpContents[1]
 	require.False(t, saved.ReplyToMsgID.Valid)
 	require.False(t, saved.QuotePart.Valid)
 	require.Equal(t, int64(42), saved.UserID)
 	require.Equal(t, "alice", saved.AtableUsername.String)
 }
 
+func TestAddTgMessageWithReplyDoesNotDuplicateActiveChain(t *testing.T) {
+	previousBot := mainBot
+	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot"}}
+	t.Cleanup(func() { mainBot = previousBot })
+	replied := &gotgbot.Message{MessageId: 881001, Date: 120,
+		Chat: gotgbot.Chat{Id: -910102, Type: "supergroup"},
+		From: &gotgbot.User{Id: 7, FirstName: "Bob"}, Text: "already present"}
+	current := &gotgbot.Message{MessageId: 881002, Date: 123,
+		Chat: gotgbot.Chat{Id: -910102, Type: "supergroup"},
+		From: &gotgbot.User{Id: 42, FirstName: "Alice"}, Text: "new", ReplyToMessage: replied}
+	session := &GeminiSession{GeminiSession: q.GeminiSession{ID: 6},
+		Contents: []q.GeminiContent{{MsgID: replied.MessageId}}}
+	require.NoError(t, session.AddTgMessageWithReply(context.Background(), nil, current))
+	require.Len(t, session.TmpContents, 1)
+	require.Equal(t, current.MessageId, session.TmpContents[0].MsgID)
+}
+
+func TestReplyOutsideActiveWindowIsContextOnlyAndDoesNotDuplicateDatabaseRow(t *testing.T) {
+	ctx := context.Background()
+	previousBot := mainBot
+	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot"}}
+	t.Cleanup(func() { mainBot = previousBot })
+	oldSession, err := g.Q.CreateNewGeminiSession(ctx, -910103, "old", "supergroup")
+	require.NoError(t, err)
+	oldContent := q.GeminiContent{SessionID: oldSession.ID, ChatID: -910103, MsgID: 882001,
+		Role: genai.RoleUser, SentTime: q.UnixTime{Time: time.Unix(120, 0)}, Username: "Bob",
+		MsgType: "text", Text: sql.NullString{String: "stored old reply", Valid: true}, UserID: 7}
+	require.NoError(t, oldContent.Save(ctx, g.Q))
+	currentSession, err := g.Q.CreateNewGeminiSession(ctx, -910103, "current", "supergroup")
+	require.NoError(t, err)
+	replied := &gotgbot.Message{MessageId: 882001, Date: 120,
+		Chat: gotgbot.Chat{Id: -910103, Type: "supergroup"},
+		From: &gotgbot.User{Id: 7, FirstName: "Bob"}, Text: "stored old reply"}
+	current := &gotgbot.Message{MessageId: 882002, Date: 123,
+		Chat: gotgbot.Chat{Id: -910103, Type: "supergroup"},
+		From: &gotgbot.User{Id: 42, FirstName: "Alice"}, Text: "new", ReplyToMessage: replied}
+	session := &GeminiSession{GeminiSession: currentSession}
+	require.NoError(t, session.AddTgMessageWithReply(ctx, nil, current))
+	require.Contains(t, session.TmpContextOnlyMsgIDs, int64(882001))
+	require.NoError(t, session.PersistTmpUpdates(ctx))
+	saved, err := g.Q.GetAllMsgInSession(ctx, currentSession.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, saved, 1)
+	require.Equal(t, int64(882002), saved[0].MsgID)
+	require.Len(t, session.Contents, 2, "the replied message remains in the active in-memory chain")
+}
+
 func TestPersistTmpUpdatesStoresBodyPayloadAndUsageAtomically(t *testing.T) {
 	ctx := context.Background()
 	dbSession, err := g.Q.CreateNewGeminiSession(ctx, -900001, "transaction test", "private")
 	require.NoError(t, err)
+	require.NoError(t, g.SetAISessionModel(ctx, dbSession.ID, ProviderDeepSeek, ModelDeepSeekFlash))
 	previousBot := mainBot
 	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot", Username: "testbot"}}
 	t.Cleanup(func() { mainBot = previousBot })
@@ -236,6 +310,11 @@ func TestPersistTmpUpdatesStoresBodyPayloadAndUsageAtomically(t *testing.T) {
 		AssistantPayload:       []byte(`{"role":"assistant","reasoning_content":"think","content":"answer"}`),
 		AssistantPayloadFormat: PayloadFormatDeepSeekMessage,
 		Usage:                  AIUsage{InputTokens: 100, OutputTokens: 20, CachedInputTokens: 80},
+		InteractionID:          "int-persisted",
+		WindowStartMsgID:       5001,
+		InputMessageCount:      1,
+		InputFirstMsgID:        5001,
+		InputLastMsgID:         5001,
 	}
 	session.AddModelMessage(&gotgbot.Message{
 		MessageId: 5002, Date: 123, Chat: gotgbot.Chat{Id: -900001, Type: "private"},
@@ -254,6 +333,14 @@ func TestPersistTmpUpdatesStoresBodyPayloadAndUsageAtomically(t *testing.T) {
 	usage, err := g.GetAIMessageUsage(ctx, -900001, 5002)
 	require.NoError(t, err)
 	require.Equal(t, int64(80), usage.CachedInputTokens)
+	require.Equal(t, dbSession.ID, usage.SessionID)
+	require.Equal(t, int64(1), usage.InputMessageCount)
+	require.Equal(t, int64(5001), usage.InputFirstMsgID)
+	require.Equal(t, int64(5001), usage.InputLastMsgID)
+	runtimeState, err := g.GetAISessionRuntimeState(ctx, dbSession.ID)
+	require.NoError(t, err)
+	require.Equal(t, "int-persisted", runtimeState.GeminiInteractionID)
+	require.Equal(t, int64(5001), runtimeState.WindowStartMsgID)
 
 	failedDBSession, err := g.Q.CreateNewGeminiSession(ctx, -900002, "rollback test", "private")
 	require.NoError(t, err)
@@ -278,6 +365,59 @@ func TestPersistTmpUpdatesStoresBodyPayloadAndUsageAtomically(t *testing.T) {
 	require.ErrorIs(t, err, sql.ErrNoRows)
 }
 
+func TestPersistedSlidingWindowKeepsFullDatabaseHistory(t *testing.T) {
+	ctx := context.Background()
+	dbSession, err := g.Q.CreateNewGeminiSession(ctx, -900003, "window persistence", "private")
+	require.NoError(t, err)
+	require.NoError(t, g.SetAISessionModel(ctx, dbSession.ID, ProviderGemini, ModelGeminiFlash))
+
+	previousBot := mainBot
+	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot", Username: "testbot"}}
+	t.Cleanup(func() { mainBot = previousBot })
+
+	session := &GeminiSession{
+		GeminiSession: dbSession, Provider: ProviderGemini, Model: ModelGeminiFlash,
+		AssistantPayloads: make(map[int64]g.AIAssistantPayload),
+	}
+	for id := int64(1); id <= 200; id++ {
+		content := interactionTestContent(id+7000, genai.RoleUser, "history")
+		content.SessionID = dbSession.ID
+		content.ChatID = -900003
+		session.TmpContents = append(session.TmpContents, content)
+	}
+	require.NoError(t, session.PersistTmpUpdates(ctx))
+	require.Len(t, session.Contents, 200)
+
+	current := interactionTestContent(7201, genai.RoleUser, "current")
+	current.SessionID = dbSession.ID
+	current.ChatID = -900003
+	session.TmpContents = []q.GeminiContent{current}
+	window := session.prepareRequestWindow()
+	require.Equal(t, 50, window.Drop)
+	result := &AIResult{
+		DisplayText: "answer", AssistantPayload: []byte(`[{"type":"model_output","content":[{"type":"text","text":"answer"}]}]`),
+		AssistantPayloadFormat: PayloadFormatGeminiInteractionSteps,
+		InteractionID:          "int-window", WindowStartMsgID: window.StartMsgID, WindowDrop: window.Drop,
+	}
+	session.AddModelMessage(&gotgbot.Message{
+		MessageId: 7202, Date: 123, Chat: gotgbot.Chat{Id: -900003, Type: "private"},
+	}, result)
+	require.NoError(t, session.PersistTmpUpdates(ctx))
+	require.Len(t, session.Contents, 152)
+	require.Equal(t, int64(7051), session.Contents[0].MsgID)
+
+	allDatabaseContents, err := g.Q.GetAllMsgInSession(ctx, dbSession.ID, 500)
+	require.NoError(t, err)
+	require.Len(t, allDatabaseContents, 202)
+
+	reloaded := &GeminiSession{GeminiSession: dbSession}
+	require.NoError(t, reloaded.loadContentFromDatabase(ctx))
+	require.NoError(t, reloaded.loadModel(ctx, defaultAIModel))
+	require.Len(t, reloaded.Contents, 152)
+	require.Equal(t, int64(7051), reloaded.Contents[0].MsgID)
+	require.Equal(t, "int-window", reloaded.GeminiInteractionID)
+}
+
 func ptr[T any](value T) *T { return &value }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -287,9 +427,20 @@ func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error)
 }
 
 func TestModelKeyboardMarksCurrent(t *testing.T) {
-	keyboard := modelKeyboard(ModelDeepSeekFlash)
+	keyboard := modelKeyboard(ModelDeepSeekFlash, 12345)
 	require.Len(t, keyboard.InlineKeyboard, 3)
 	require.True(t, strings.HasPrefix(keyboard.InlineKeyboard[2][0].Text, "✅"))
+	for _, row := range keyboard.InlineKeyboard {
+		require.LessOrEqual(t, len(row[0].CallbackData), 64)
+		sessionID, model, ok := parseModelCallback(row[0].CallbackData)
+		require.True(t, ok)
+		require.Equal(t, int64(12345), sessionID)
+		require.NotEmpty(t, model)
+	}
+	legacySessionID, legacyModel, ok := parseModelCallback(modelCallbackPrefix + ModelGeminiFlash)
+	require.True(t, ok)
+	require.Zero(t, legacySessionID)
+	require.Equal(t, ModelGeminiFlash, legacyModel)
 }
 
 func TestPrivateChatCanChangeModel(t *testing.T) {
@@ -340,9 +491,10 @@ func TestUsageButtonAndAlertFormatting(t *testing.T) {
 	require.False(t, IsUsageCallback(&gotgbot.CallbackQuery{Data: usageCallbackData + ":forged"}))
 
 	alert := formatUsageAlert(g.AIMessageUsage{
-		Model: ModelDeepSeekFlash, InputTokens: 27014, OutputTokens: 32, CachedInputTokens: 27008,
+		SessionID: 7763, Model: ModelDeepSeekFlash, InputTokens: 27014, OutputTokens: 32,
+		CachedInputTokens: 27008, InputMessageCount: 174, InputFirstMsgID: 100, InputLastMsgID: 274,
 	})
-	require.Equal(t, "模型: deepseek-v4-flash\n输入: 27.01 ktoken\n输出: 0.03 ktoken\n缓存: 27.01 ktoken", alert)
+	require.Equal(t, "ID: 7763\n消息: 174（100-274）\n模型: deepseek-v4-flash\n输入: 27.01 ktoken\n输出: 0.03 ktoken\n缓存: 27.01 ktoken", alert)
 	require.LessOrEqual(t, len([]rune(alert)), 200)
 
 	longAlert := formatUsageAlert(g.AIMessageUsage{Model: strings.Repeat("模", 300)})

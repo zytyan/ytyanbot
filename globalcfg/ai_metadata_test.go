@@ -73,12 +73,14 @@ func TestAIMetadataMigrationAndUsagePersistence(t *testing.T) {
 	payload := []byte(`{"role":"assistant","reasoning_content":"think","content":"answer"}`)
 	require.NoError(t, UpsertAIMessageResponse(context.Background(), database, 7, 99, -1001,
 		AIMessageUsage{Provider: "deepseek", Model: "deepseek-v4-flash", InputTokens: 27014,
-			OutputTokens: 32, CachedInputTokens: 27008}, "deepseek-message-v1", payload))
+			OutputTokens: 32, CachedInputTokens: 27008, InputMessageCount: 174,
+			InputFirstMsgID: 100, InputLastMsgID: 274}, "deepseek-message-v1", payload))
 	usage, err := getAIMessageUsage(context.Background(), database, -1001, 99)
 	require.NoError(t, err)
 	require.Equal(t, AIMessageUsage{
-		Provider: "deepseek", Model: "deepseek-v4-flash", InputTokens: 27014,
-		OutputTokens: 32, CachedInputTokens: 27008,
+		SessionID: 7, Provider: "deepseek", Model: "deepseek-v4-flash", InputTokens: 27014,
+		OutputTokens: 32, CachedInputTokens: 27008, InputMessageCount: 174,
+		InputFirstMsgID: 100, InputLastMsgID: 274,
 	}, usage)
 	var payloadFormat string
 	var savedPayload []byte
@@ -94,6 +96,30 @@ WHERE chat_id=-1001 AND thread_id=0`).Scan(&migratedPrompt))
 	require.NotContains(t, migratedPrompt, "%QUOTE%")
 	require.Contains(t, migratedPrompt, "最新用户消息头")
 	require.Contains(t, migratedPrompt, "不可用")
+
+	_, err = database.Exec(`INSERT INTO ai_session_meta(session_id, provider, model)
+VALUES (7, 'gemini', 'gemini-3-flash-preview')`)
+	require.NoError(t, err)
+	require.NoError(t, SetAISessionRuntimeState(context.Background(), database, 7, "int-test", 51))
+	runtimeState, err := getAISessionRuntimeState(context.Background(), database, 7)
+	require.NoError(t, err)
+	require.Equal(t, AISessionRuntimeState{GeminiInteractionID: "int-test", WindowStartMsgID: 51}, runtimeState)
+
+	require.NoError(t, changeAISessionModel(context.Background(), database, 7,
+		"deepseek", "deepseek-v4-flash"))
+	runtimeState, err = getAISessionRuntimeState(context.Background(), database, 7)
+	require.NoError(t, err)
+	require.Equal(t, AISessionRuntimeState{WindowStartMsgID: 51, HistoryRebuildLossy: true}, runtimeState)
+	var provider, sessionModel string
+	require.NoError(t, database.QueryRow(`SELECT provider, model FROM ai_session_meta WHERE session_id=7`).
+		Scan(&provider, &sessionModel))
+	require.Equal(t, "deepseek", provider)
+	require.Equal(t, "deepseek-v4-flash", sessionModel)
+
+	require.NoError(t, SetAISessionRuntimeState(context.Background(), database, 7, "int-after-switch", 51))
+	runtimeState, err = getAISessionRuntimeState(context.Background(), database, 7)
+	require.NoError(t, err)
+	require.Equal(t, AISessionRuntimeState{GeminiInteractionID: "int-after-switch", WindowStartMsgID: 51}, runtimeState)
 
 	tx, err := database.BeginTx(context.Background(), nil)
 	require.NoError(t, err)

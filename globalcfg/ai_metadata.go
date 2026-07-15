@@ -18,6 +18,9 @@ CREATE TABLE IF NOT EXISTS ai_session_meta (
     provider TEXT NOT NULL,
     model TEXT NOT NULL,
     cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+    gemini_interaction_id TEXT,
+    window_start_msg_id INTEGER,
+    history_rebuild_lossy INTEGER NOT NULL DEFAULT 0 CHECK (history_rebuild_lossy IN (0, 1)),
     FOREIGN KEY (session_id) REFERENCES gemini_sessions(id) ON DELETE CASCADE
 );
 
@@ -30,6 +33,9 @@ CREATE TABLE IF NOT EXISTS ai_message_meta (
     input_tokens INTEGER NOT NULL DEFAULT 0,
     output_tokens INTEGER NOT NULL DEFAULT 0,
     cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+    input_message_count INTEGER NOT NULL DEFAULT 0,
+    input_first_msg_id INTEGER NOT NULL DEFAULT 0,
+    input_last_msg_id INTEGER NOT NULL DEFAULT 0,
     assistant_payload BLOB,
     assistant_payload_format TEXT,
     PRIMARY KEY (session_id, msg_id),
@@ -49,8 +55,14 @@ func initAIMetadataSchema(database *sql.DB) error {
 		{"ai_message_meta", "input_tokens", "INTEGER NOT NULL DEFAULT 0"},
 		{"ai_message_meta", "output_tokens", "INTEGER NOT NULL DEFAULT 0"},
 		{"ai_message_meta", "cached_input_tokens", "INTEGER NOT NULL DEFAULT 0"},
+		{"ai_message_meta", "input_message_count", "INTEGER NOT NULL DEFAULT 0"},
+		{"ai_message_meta", "input_first_msg_id", "INTEGER NOT NULL DEFAULT 0"},
+		{"ai_message_meta", "input_last_msg_id", "INTEGER NOT NULL DEFAULT 0"},
 		{"ai_message_meta", "assistant_payload", "BLOB"},
 		{"ai_message_meta", "assistant_payload_format", "TEXT"},
+		{"ai_session_meta", "gemini_interaction_id", "TEXT"},
+		{"ai_session_meta", "window_start_msg_id", "INTEGER"},
+		{"ai_session_meta", "history_rebuild_lossy", "INTEGER NOT NULL DEFAULT 0 CHECK (history_rebuild_lossy IN (0, 1))"},
 	}
 	for _, column := range columns {
 		if err := ensureAIColumn(database, column.table, column.name, column.definition); err != nil {
@@ -182,6 +194,30 @@ ON CONFLICT(session_id) DO UPDATE SET provider=excluded.provider, model=excluded
 	return err
 }
 
+// ChangeAISessionModel changes an existing historical session. The previous
+// remote Gemini chain cannot be reused across models/providers, so the next
+// request must bootstrap from a lossy, locally stored history representation.
+func ChangeAISessionModel(ctx context.Context, sessionID int64, provider, model string) error {
+	return changeAISessionModel(ctx, db, sessionID, provider, model)
+}
+
+func changeAISessionModel(ctx context.Context, executor AIResponseExecutor, sessionID int64, provider, model string) error {
+	result, err := executor.ExecContext(ctx, `UPDATE ai_session_meta
+SET provider = ?, model = ?, gemini_interaction_id = NULL, history_rebuild_lossy = 1
+WHERE session_id = ?`, provider, model, sessionID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("change AI session model: session %d not found", sessionID)
+	}
+	return nil
+}
+
 func IncrementAICachedTokens(ctx context.Context, sessionID, tokens int64) error {
 	_, err := db.ExecContext(ctx, `UPDATE ai_session_meta
 SET cached_input_tokens=cached_input_tokens + ? WHERE session_id = ?`, tokens, sessionID)
@@ -189,11 +225,15 @@ SET cached_input_tokens=cached_input_tokens + ? WHERE session_id = ?`, tokens, s
 }
 
 type AIMessageUsage struct {
+	SessionID         int64
 	Provider          string
 	Model             string
 	InputTokens       int64
 	OutputTokens      int64
 	CachedInputTokens int64
+	InputMessageCount int64
+	InputFirstMsgID   int64
+	InputLastMsgID    int64
 }
 
 type AIAssistantPayload struct {
@@ -201,6 +241,60 @@ type AIAssistantPayload struct {
 	Provider string
 	Format   string
 	Payload  []byte
+}
+
+type AISessionRuntimeState struct {
+	GeminiInteractionID string
+	WindowStartMsgID    int64
+	HistoryRebuildLossy bool
+}
+
+func GetAISessionRuntimeState(ctx context.Context, sessionID int64) (state AISessionRuntimeState, err error) {
+	return getAISessionRuntimeState(ctx, db, sessionID)
+}
+
+func getAISessionRuntimeState(ctx context.Context, database *sql.DB, sessionID int64) (state AISessionRuntimeState, err error) {
+	var interactionID sql.NullString
+	var windowStart sql.NullInt64
+	err = database.QueryRowContext(ctx, `SELECT gemini_interaction_id, window_start_msg_id, history_rebuild_lossy
+FROM ai_session_meta WHERE session_id = ?`, sessionID).Scan(&interactionID, &windowStart, &state.HistoryRebuildLossy)
+	if err != nil {
+		return state, err
+	}
+	if interactionID.Valid {
+		state.GeminiInteractionID = interactionID.String
+	}
+	if windowStart.Valid {
+		state.WindowStartMsgID = windowStart.Int64
+	}
+	return state, nil
+}
+
+func SetAISessionRuntimeState(ctx context.Context, executor AIResponseExecutor, sessionID int64,
+	interactionID string, windowStartMsgID int64,
+) error {
+	var interactionValue any
+	if interactionID != "" {
+		interactionValue = interactionID
+	}
+	var windowValue any
+	if windowStartMsgID != 0 {
+		windowValue = windowStartMsgID
+	}
+	result, err := executor.ExecContext(ctx, `UPDATE ai_session_meta
+SET gemini_interaction_id = ?, window_start_msg_id = ?, history_rebuild_lossy = 0 WHERE session_id = ?`,
+		interactionValue, windowValue, sessionID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("update AI session runtime state: session %d not found", sessionID)
+	}
+	return nil
 }
 
 type AIResponseExecutor interface {
@@ -225,16 +319,20 @@ func UpsertAIMessageResponse(ctx context.Context, executor AIResponseExecutor, s
 	}
 	_, err := executor.ExecContext(ctx, `INSERT INTO ai_message_meta(
 session_id, msg_id, chat_id, provider, model, input_tokens, output_tokens, cached_input_tokens,
-assistant_payload, assistant_payload_format)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+input_message_count, input_first_msg_id, input_last_msg_id, assistant_payload, assistant_payload_format)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id, msg_id) DO UPDATE SET
 chat_id=excluded.chat_id, provider=excluded.provider, model=excluded.model,
 input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens,
 cached_input_tokens=excluded.cached_input_tokens,
+input_message_count=excluded.input_message_count,
+input_first_msg_id=excluded.input_first_msg_id,
+input_last_msg_id=excluded.input_last_msg_id,
 assistant_payload=COALESCE(excluded.assistant_payload, ai_message_meta.assistant_payload),
 assistant_payload_format=COALESCE(excluded.assistant_payload_format, ai_message_meta.assistant_payload_format)`,
 		sessionID, msgID, chatID, usage.Provider, usage.Model, usage.InputTokens, usage.OutputTokens,
-		usage.CachedInputTokens, payload, format)
+		usage.CachedInputTokens, usage.InputMessageCount, usage.InputFirstMsgID, usage.InputLastMsgID,
+		payload, format)
 	return err
 }
 
@@ -262,8 +360,10 @@ func GetAIMessageUsage(ctx context.Context, chatID, msgID int64) (usage AIMessag
 }
 
 func getAIMessageUsage(ctx context.Context, database *sql.DB, chatID, msgID int64) (usage AIMessageUsage, err error) {
-	err = database.QueryRowContext(ctx, `SELECT provider, model, input_tokens, output_tokens, cached_input_tokens
+	err = database.QueryRowContext(ctx, `SELECT session_id, provider, model, input_tokens, output_tokens, cached_input_tokens,
+input_message_count, input_first_msg_id, input_last_msg_id
 FROM ai_message_meta WHERE chat_id = ? AND msg_id = ?`, chatID, msgID).Scan(
-		&usage.Provider, &usage.Model, &usage.InputTokens, &usage.OutputTokens, &usage.CachedInputTokens)
+		&usage.SessionID, &usage.Provider, &usage.Model, &usage.InputTokens, &usage.OutputTokens,
+		&usage.CachedInputTokens, &usage.InputMessageCount, &usage.InputFirstMsgID, &usage.InputLastMsgID)
 	return
 }

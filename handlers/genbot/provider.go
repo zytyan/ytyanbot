@@ -26,8 +26,9 @@ const (
 	ProviderGemini   = "gemini"
 	ProviderDeepSeek = "deepseek"
 
-	PayloadFormatGeminiContent   = "gemini-content-v1"
-	PayloadFormatDeepSeekMessage = "deepseek-message-v1"
+	PayloadFormatGeminiContent          = "gemini-content-v1"
+	PayloadFormatGeminiInteractionSteps = "gemini-interaction-steps-v1"
+	PayloadFormatDeepSeekMessage        = "deepseek-message-v1"
 )
 
 var ErrDeepSeekVideoOnly = errors.New("当前模型不处理视频")
@@ -47,6 +48,12 @@ type AIResult struct {
 	ThoughtSignature       string
 	Feedback               string
 	Raw                    []byte
+	InteractionID          string
+	WindowStartMsgID       int64
+	WindowDrop             int
+	InputMessageCount      int64
+	InputFirstMsgID        int64
+	InputLastMsgID         int64
 }
 
 type modelOption struct {
@@ -78,19 +85,28 @@ func providerForModel(model string) string {
 }
 
 func generateAI(ctx context.Context, session *GeminiSession, systemPrompt string, geminiConfig *genai.GenerateContentConfig) (*AIResult, error) {
+	window := session.prepareRequestWindow()
+	var result *AIResult
+	var err error
 	if session.Provider == ProviderDeepSeek {
-		return generateDeepSeek(ctx, session, systemPrompt)
+		result, err = generateDeepSeek(ctx, session, systemPrompt, window)
+	} else {
+		if geminiConfig.ThinkingConfig == nil {
+			geminiConfig.ThinkingConfig = &genai.ThinkingConfig{}
+		}
+		geminiConfig.ThinkingConfig.IncludeThoughts = true
+		result, err = generateGeminiWithInteractions(ctx, session, systemPrompt, geminiConfig, window)
 	}
-	geminiConfig.SystemInstruction = genai.NewContentFromText(systemPrompt, genai.RoleModel)
-	if geminiConfig.ThinkingConfig == nil {
-		geminiConfig.ThinkingConfig = &genai.ThinkingConfig{}
+	if result != nil {
+		result.WindowStartMsgID = window.StartMsgID
+		result.WindowDrop = window.Drop
+		result.InputMessageCount = int64(len(window.Contents))
+		if len(window.Contents) > 0 {
+			result.InputFirstMsgID = window.Contents[0].MsgID
+			result.InputLastMsgID = window.Contents[len(window.Contents)-1].MsgID
+		}
 	}
-	geminiConfig.ThinkingConfig.IncludeThoughts = true
-	response, err := generateGemini(ctx, session, geminiConfig)
-	if err != nil {
-		return nil, err
-	}
-	return resultFromGeminiResponse(response)
+	return result, err
 }
 
 func resultFromGeminiResponse(response *genai.GenerateContentResponse) (*AIResult, error) {
@@ -184,12 +200,16 @@ type deepSeekResponse struct {
 	} `json:"usage"`
 }
 
-func generateDeepSeek(ctx context.Context, session *GeminiSession, systemPrompt string) (*AIResult, error) {
+func generateDeepSeek(ctx context.Context, session *GeminiSession, systemPrompt string, window aiRequestWindow) (*AIResult, error) {
 	cfg := g.GetConfig()
 	if cfg.DeepSeekKey == "" {
 		return nil, errors.New("DeepSeek API Key 未配置")
 	}
-	messages, err := session.ToDeepSeekMessages(systemPrompt)
+	requestSession := &GeminiSession{
+		Contents: window.Contents, AssistantPayloads: session.AssistantPayloads,
+		HistoryRebuildLossy: session.HistoryRebuildLossy,
+	}
+	messages, err := requestSession.ToDeepSeekMessages(systemPrompt)
 	if err != nil {
 		return nil, err
 	}

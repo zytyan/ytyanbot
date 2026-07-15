@@ -74,6 +74,149 @@ func TestLiveGeminiImplicitCache(t *testing.T) {
 	require.Greater(t, second.UsageMetadata.CachedContentTokenCount, int32(0))
 }
 
+func TestLiveGeminiInteractionsImplicitCache(t *testing.T) {
+	requireLiveAI(t)
+	stablePrefix := q.GeminiContent{
+		MsgID: 101, Role: genai.RoleUser, Username: "cache tester", MsgType: "text",
+		SentTime: q.UnixTime{Time: time.Unix(101, 0)},
+		Text: sql.NullString{String: strings.Repeat(
+			"这是用于验证 Interactions 隐式缓存的稳定公共前缀，不包含任何真实用户数据。", 2500), Valid: true},
+	}
+	firstQuestion := q.GeminiContent{
+		MsgID: 102, Role: genai.RoleUser, Username: "cache tester", MsgType: "text",
+		SentTime: q.UnixTime{Time: time.Unix(102, 0)}, Text: sql.NullString{String: "只回答 OK。", Valid: true},
+	}
+	session := &GeminiSession{
+		Contents: []q.GeminiContent{stablePrefix}, TmpContents: []q.GeminiContent{firstQuestion},
+		AssistantPayloads: make(map[int64]g.AIAssistantPayload), Provider: ProviderGemini, Model: ModelGeminiFlash,
+	}
+	config := &genai.GenerateContentConfig{ThinkingConfig: &genai.ThinkingConfig{IncludeThoughts: true}, MaxOutputTokens: 32}
+	first, err := generateGeminiWithInteractions(context.Background(), session, "缓存验证；只回答 OK。", config,
+		session.prepareRequestWindow())
+	require.NoError(t, err)
+	require.NotEmpty(t, first.InteractionID)
+
+	modelRecord := q.GeminiContent{
+		MsgID: 103, Role: genai.RoleModel, Username: "bot", MsgType: "text",
+		SentTime: q.UnixTime{Time: time.Unix(103, 0)}, Text: sql.NullString{String: first.DisplayText, Valid: true},
+	}
+	session.Contents = append(session.Contents, firstQuestion, modelRecord)
+	session.AssistantPayloads[103] = g.AIAssistantPayload{
+		MsgID: 103, Provider: ProviderGemini, Format: first.AssistantPayloadFormat, Payload: first.AssistantPayload,
+	}
+	session.GeminiInteractionID = first.InteractionID
+	session.TmpContents = []q.GeminiContent{{
+		MsgID: 104, Role: genai.RoleUser, Username: "cache tester", MsgType: "text",
+		SentTime: q.UnixTime{Time: time.Unix(104, 0)}, Text: sql.NullString{String: "再次只回答 OK。", Valid: true},
+	}}
+	var second *AIResult
+	for attempt := 0; attempt < 3; attempt++ {
+		second, err = generateGeminiWithInteractions(context.Background(), session, "缓存验证；只回答 OK。", config,
+			session.prepareRequestWindow())
+		require.NoError(t, err)
+		t.Logf("gemini interactions attempt=%d input=%d cached=%d", attempt+1,
+			second.Usage.InputTokens, second.Usage.CachedInputTokens)
+		if second.Usage.CachedInputTokens > 0 {
+			break
+		}
+		time.Sleep(3 * time.Second)
+	}
+	require.Greater(t, second.Usage.CachedInputTokens, int64(0))
+}
+
+func TestLiveGeminiInteractionsFlashLite(t *testing.T) {
+	requireLiveAI(t)
+	stablePrefix := q.GeminiContent{
+		MsgID: 151, Role: genai.RoleUser, Username: "cache tester", MsgType: "text",
+		SentTime: q.UnixTime{Time: time.Unix(151, 0)},
+		Text: sql.NullString{String: strings.Repeat(
+			"这是用于验证 Flash-Lite Interactions 缓存的稳定公共前缀。", 2500), Valid: true},
+	}
+	question := q.GeminiContent{
+		MsgID: 152, Role: genai.RoleUser, Username: "cache tester", MsgType: "text",
+		SentTime: q.UnixTime{Time: time.Unix(152, 0)}, Text: sql.NullString{String: "只回答 OK。", Valid: true},
+	}
+	session := &GeminiSession{
+		Contents: []q.GeminiContent{stablePrefix}, TmpContents: []q.GeminiContent{question},
+		AssistantPayloads: make(map[int64]g.AIAssistantPayload), Provider: ProviderGemini, Model: ModelGeminiFlashLite,
+	}
+	config := &genai.GenerateContentConfig{ThinkingConfig: &genai.ThinkingConfig{IncludeThoughts: true}, MaxOutputTokens: 32}
+	first, err := generateGeminiWithInteractions(context.Background(), session, "缓存验证；只回答 OK。", config,
+		session.prepareRequestWindow())
+	require.NoError(t, err)
+	require.NotEmpty(t, first.InteractionID)
+	modelRecord := q.GeminiContent{
+		MsgID: 153, Role: genai.RoleModel, Username: "bot", MsgType: "text",
+		SentTime: q.UnixTime{Time: time.Unix(153, 0)}, Text: sql.NullString{String: first.DisplayText, Valid: true},
+	}
+	session.Contents = append(session.Contents, question, modelRecord)
+	session.AssistantPayloads[153] = g.AIAssistantPayload{
+		MsgID: 153, Provider: ProviderGemini, Format: first.AssistantPayloadFormat, Payload: first.AssistantPayload,
+	}
+	session.GeminiInteractionID = first.InteractionID
+	session.TmpContents = []q.GeminiContent{{
+		MsgID: 154, Role: genai.RoleUser, Username: "cache tester", MsgType: "text",
+		SentTime: q.UnixTime{Time: time.Unix(154, 0)}, Text: sql.NullString{String: "再次只回答 OK。", Valid: true},
+	}}
+	second, err := generateGeminiWithInteractions(context.Background(), session, "缓存验证；只回答 OK。", config,
+		session.prepareRequestWindow())
+	require.NoError(t, err)
+	require.NotEmpty(t, second.InteractionID)
+	t.Logf("gemini flash-lite interactions input=%d cached=%d", second.Usage.InputTokens, second.Usage.CachedInputTokens)
+}
+
+func TestLiveGeminiInteractionsToolsAndRawReplay(t *testing.T) {
+	requireLiveAI(t)
+	stablePrefix := q.GeminiContent{
+		MsgID: 201, Role: genai.RoleUser, Username: "cache tester", MsgType: "text",
+		SentTime: q.UnixTime{Time: time.Unix(201, 0)},
+		Text: sql.NullString{String: strings.Repeat(
+			"这是用于验证 Interactions 工具历史与缓存的稳定公共前缀。", 2500), Valid: true},
+	}
+	question := q.GeminiContent{
+		MsgID: 202, Role: genai.RoleUser, Username: "cache tester", MsgType: "text",
+		SentTime: q.UnixTime{Time: time.Unix(202, 0)},
+		Text:     sql.NullString{String: "必须调用 Google Search 查询今天美元兑欧元汇率，再调用代码执行计算 12345 美元可兑换多少欧元。", Valid: true},
+	}
+	session := &GeminiSession{
+		Contents: []q.GeminiContent{stablePrefix}, TmpContents: []q.GeminiContent{question},
+		AssistantPayloads: make(map[int64]g.AIAssistantPayload), Provider: ProviderGemini, Model: ModelGeminiFlash,
+	}
+	config := &genai.GenerateContentConfig{
+		Tools:          []*genai.Tool{{GoogleSearch: &genai.GoogleSearch{}, CodeExecution: &genai.ToolCodeExecution{}}},
+		ThinkingConfig: &genai.ThinkingConfig{IncludeThoughts: true}, MaxOutputTokens: 2048,
+	}
+	first, err := generateGeminiWithInteractions(context.Background(), session, "严格调用用户要求的工具。", config,
+		session.prepareRequestWindow())
+	require.NoError(t, err)
+	payload := string(first.AssistantPayload)
+	require.Contains(t, payload, `"type":"google_search_call"`)
+	require.Contains(t, payload, `"type":"code_execution_call"`)
+	require.Contains(t, payload, `"type":"code_execution_result"`)
+	require.Contains(t, payload, `"type":"model_output"`)
+
+	modelRecord := q.GeminiContent{
+		MsgID: 203, Role: genai.RoleModel, Username: "bot", MsgType: "text",
+		SentTime: q.UnixTime{Time: time.Unix(203, 0)}, Text: sql.NullString{String: first.DisplayText, Valid: true},
+	}
+	session.Contents = append(session.Contents, question, modelRecord)
+	session.AssistantPayloads[203] = g.AIAssistantPayload{
+		MsgID: 203, Provider: ProviderGemini, Format: first.AssistantPayloadFormat, Payload: first.AssistantPayload,
+	}
+	session.GeminiInteractionID = first.InteractionID
+	session.TmpContents = []q.GeminiContent{{
+		MsgID: 204, Role: genai.RoleUser, Username: "cache tester", MsgType: "text",
+		SentTime: q.UnixTime{Time: time.Unix(204, 0)}, Text: sql.NullString{String: "确认上一轮工具结果可读，只回答 OK。", Valid: true},
+	}}
+	second, err := generateGeminiWithInteractions(context.Background(), session, "严格调用用户要求的工具。", config,
+		session.prepareRequestWindow())
+	require.NoError(t, err)
+	require.NotEmpty(t, second.DisplayText)
+	t.Logf("gemini interactions tools input=%d cached=%d output=%d", second.Usage.InputTokens,
+		second.Usage.CachedInputTokens, second.Usage.OutputTokens)
+	require.Greater(t, second.Usage.CachedInputTokens, int64(0))
+}
+
 func TestLiveGeminiToolsRawReplayAndCache(t *testing.T) {
 	requireLiveAI(t)
 	stablePrefix := q.GeminiContent{

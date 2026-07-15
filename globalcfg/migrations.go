@@ -27,6 +27,12 @@ ai metadata baseline v1
 - create the unique chat/message usage lookup index
 `
 
+const removeLegacyAIMemorySource = `
+remove legacy ai memory v2
+- remove the deprecated %MEMORIES% placeholder from saved system prompts
+- drop gemini_memories and its index
+`
+
 const aiMetadataSchema = `
 CREATE TABLE IF NOT EXISTS ai_chat_models (
     chat_id INTEGER PRIMARY KEY,
@@ -84,6 +90,12 @@ var mainDatabaseMigrations = []databaseMigration{
 		name:    "ai_metadata_baseline",
 		source:  aiMetadataBaselineSource,
 		run:     migrateAIMetadataBaseline,
+	},
+	{
+		version: 2,
+		name:    "remove_legacy_ai_memory",
+		source:  removeLegacyAIMemorySource,
+		run:     migrateRemoveLegacyAIMemory,
 	},
 }
 
@@ -246,4 +258,20 @@ SET prompt=replace(prompt, ?, ?) WHERE instr(prompt, ?) > 0`,
 		}
 	}
 	return nil
+}
+
+func migrateRemoveLegacyAIMemory(ctx context.Context, tx *sql.Tx) error {
+	var promptsExist bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
+SELECT 1 FROM sqlite_master WHERE type='table' AND name='gemini_system_prompt')`).Scan(&promptsExist); err != nil {
+		return err
+	}
+	if promptsExist {
+		if _, err := tx.ExecContext(ctx, `UPDATE gemini_system_prompt
+SET prompt=replace(prompt, '%MEMORIES%', '') WHERE instr(prompt, '%MEMORIES%') > 0`); err != nil {
+			return err
+		}
+	}
+	_, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS gemini_memories`)
+	return err
 }

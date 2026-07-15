@@ -43,13 +43,21 @@ CREATE TABLE gemini_system_prompt (
     prompt TEXT NOT NULL,
     PRIMARY KEY(chat_id, thread_id)
 ) WITHOUT ROWID;
+CREATE TABLE gemini_memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL,
+    topic_id INTEGER NOT NULL,
+    content TEXT NOT NULL
+);
 INSERT INTO gemini_sessions(id) VALUES (7);
 INSERT INTO gemini_contents(session_id, chat_id, msg_id) VALUES (7, -1001, 99);
 INSERT INTO ai_chat_models(chat_id, model) VALUES (-1001, 'old-model');
 INSERT INTO ai_message_meta(session_id, msg_id, provider, model)
 VALUES (7, 99, 'gemini', 'old-model');
 INSERT INTO gemini_system_prompt(chat_id, thread_id, prompt)
-VALUES (-1001, 0, 'time=%DATETIME_TZ% sender=%SENDER_NAME% quote=%QUOTE%');`)
+VALUES (-1001, 0, 'time=%DATETIME_TZ% sender=%SENDER_NAME% quote=%QUOTE% memory=%MEMORIES%');
+INSERT INTO gemini_memories(chat_id, topic_id, content)
+VALUES (-1001, 0, 'deprecated');`)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, database.Close()) })
 	return database
@@ -94,8 +102,13 @@ WHERE chat_id=-1001 AND thread_id=0`).Scan(&migratedPrompt))
 	require.NotContains(t, migratedPrompt, "%DATETIME_TZ%")
 	require.NotContains(t, migratedPrompt, "%SENDER_NAME%")
 	require.NotContains(t, migratedPrompt, "%QUOTE%")
+	require.NotContains(t, migratedPrompt, "%MEMORIES%")
 	require.Contains(t, migratedPrompt, "最新用户消息头")
 	require.Contains(t, migratedPrompt, "不可用")
+	var legacyMemoryExists bool
+	require.NoError(t, database.QueryRow(`SELECT EXISTS(
+SELECT 1 FROM sqlite_master WHERE type='table' AND name='gemini_memories')`).Scan(&legacyMemoryExists))
+	require.False(t, legacyMemoryExists)
 
 	_, err = database.Exec(`INSERT INTO ai_session_meta(session_id, provider, model)
 VALUES (7, 'gemini', 'gemini-3-flash-preview')`)

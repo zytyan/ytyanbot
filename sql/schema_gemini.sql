@@ -51,13 +51,3 @@ CREATE TABLE IF NOT EXISTS gemini_system_prompt
     prompt    TEXT    NOT NULL,
     PRIMARY KEY (chat_id, thread_id)
 ) WITHOUT ROWID;
-
-CREATE TABLE gemini_memories
-(
-    id       INTEGER PRIMARY KEY AUTOINCREMENT,
-    chat_id  INTEGER NOT NULL,
-    topic_id INTEGER NOT NULL,
-    content  TEXT    NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_gemini_memories ON gemini_memories (chat_id, topic_id);

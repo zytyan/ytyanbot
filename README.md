@@ -9,7 +9,7 @@
 - 视频与音频下载：支持 B 站链接识别/转换、B 站视频下载，以及 YouTube 视频/音频下载。
 - 图片处理：Azure OCR、成人内容检测、WebP 转 PNG、生成 prpr 和萨卡班甲鱼表情。
 - 小工具命令：计算器、汇率换算、好好说话、roll 点、COC/DND 骰子与战斗辅助。
-- AI 对话：支持 Gemini/DeepSeek、会话、系统提示词、群级模型切换、单次 Token 用量和记忆相关命令。
+- AI 对话：支持 Gemini/DeepSeek、会话、系统提示词、群级模型切换和单次 Token 用量。
 - HTTP 搜索后端：内置 Gin 后端，供前端或 Telegram WebApp 调用搜索、用户信息和头像接口。
 - Svelte 前端：`http/frontend` 下提供搜索页面和 OpenAPI 类型封装。
 

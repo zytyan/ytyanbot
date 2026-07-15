@@ -25,7 +25,6 @@ CHAT_ID: 当前聊天 ID
 BOT_NAME: Bot的名字
 BOT_USERNAME: Bot的username
 CHAT_TYPE: 聊天类型(group, private)
-MEMORIES: 当前聊天的长期记忆
 
 旧的 TIME、DATE、DATETIME、DATETIME_TZ、WEEKDAY、MSG_DATETIME、SENDER_NAME 会替换为指向最新消息头的稳定说明；MSG_ID、SENDER_USERNAME、SENDER_ID、QUOTE 会显示为“不可用”。
 

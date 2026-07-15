@@ -68,24 +68,6 @@ func (q *Queries) AddGeminiMessage(ctx context.Context, arg AddGeminiMessagePara
 	return err
 }
 
-const createGeminiMemory = `-- name: CreateGeminiMemory :one
-INSERT INTO gemini_memories (chat_id, topic_id, content)
-VALUES (?, ?, ?)
-RETURNING id, chat_id, topic_id, content
-`
-
-func (q *Queries) CreateGeminiMemory(ctx context.Context, chatID int64, topicID int64, content string) (GeminiMemory, error) {
-	row := q.queryRow(ctx, q.createGeminiMemoryStmt, createGeminiMemory, chatID, topicID, content)
-	var i GeminiMemory
-	err := row.Scan(
-		&i.ID,
-		&i.ChatID,
-		&i.TopicID,
-		&i.Content,
-	)
-	return i, err
-}
-
 const createNewGeminiSession = `-- name: CreateNewGeminiSession :one
 
 INSERT INTO gemini_sessions (chat_id, chat_name, chat_type)
@@ -117,17 +99,6 @@ ON CONFLICT DO UPDATE SET prompt=excluded.prompt
 
 func (q *Queries) CreateOrUpdateGeminiSystemPrompt(ctx context.Context, chatID int64, threadID int64, prompt string) error {
 	_, err := q.exec(ctx, q.createOrUpdateGeminiSystemPromptStmt, createOrUpdateGeminiSystemPrompt, chatID, threadID, prompt)
-	return err
-}
-
-const deleteGeminiMemory = `-- name: DeleteGeminiMemory :exec
-DELETE
-FROM gemini_memories
-WHERE id = ?
-`
-
-func (q *Queries) DeleteGeminiMemory(ctx context.Context, id int64) error {
-	_, err := q.exec(ctx, q.deleteGeminiMemoryStmt, deleteGeminiMemory, id)
 	return err
 }
 
@@ -192,42 +163,6 @@ func (q *Queries) IncrementSessionTokenCounters(ctx context.Context, totalInputT
 	return err
 }
 
-const listGeminiMemory = `-- name: ListGeminiMemory :many
-SELECT id, chat_id, topic_id, content
-FROM gemini_memories
-WHERE chat_id = ?
-  AND topic_id = ?
-LIMIT ?
-`
-
-func (q *Queries) ListGeminiMemory(ctx context.Context, chatID int64, topicID int64, limit int64) ([]GeminiMemory, error) {
-	rows, err := q.query(ctx, q.listGeminiMemoryStmt, listGeminiMemory, chatID, topicID, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []GeminiMemory
-	for rows.Next() {
-		var i GeminiMemory
-		if err := rows.Scan(
-			&i.ID,
-			&i.ChatID,
-			&i.TopicID,
-			&i.Content,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const resetGeminiSystemPrompt = `-- name: ResetGeminiSystemPrompt :exec
 DELETE
 FROM gemini_system_prompt
@@ -237,17 +172,6 @@ WHERE chat_id = ?
 
 func (q *Queries) ResetGeminiSystemPrompt(ctx context.Context, chatID int64, threadID int64) error {
 	_, err := q.exec(ctx, q.resetGeminiSystemPromptStmt, resetGeminiSystemPrompt, chatID, threadID)
-	return err
-}
-
-const updateGeminiMemory = `-- name: UpdateGeminiMemory :exec
-UPDATE gemini_memories
-SET content=?2
-WHERE id = ?1
-`
-
-func (q *Queries) UpdateGeminiMemory(ctx context.Context, iD int64, content string) error {
-	_, err := q.exec(ctx, q.updateGeminiMemoryStmt, updateGeminiMemory, iD, content)
 	return err
 }
 

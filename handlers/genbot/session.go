@@ -27,7 +27,6 @@ type GeminiSession struct {
 	TmpContents             []q.GeminiContent
 	TmpContextOnlyMsgIDs    map[int64]struct{}
 	UpdateTime              time.Time
-	Memories                []q.GeminiMemory
 	AssistantPayloads       map[int64]g.AIAssistantPayload
 	PendingResponses        map[int64]pendingAssistantResponse
 	GeminiInteractionID     string

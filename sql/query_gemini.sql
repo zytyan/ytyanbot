@@ -63,25 +63,3 @@ UPDATE gemini_sessions
 SET total_input_tokens = total_input_tokens + ?,
     total_output_tokens=total_output_tokens + ?
 WHERE id = ?;
-
--- name: CreateGeminiMemory :one
-INSERT INTO gemini_memories (chat_id, topic_id, content)
-VALUES (?, ?, ?)
-RETURNING *;
-
--- name: UpdateGeminiMemory :exec
-UPDATE gemini_memories
-SET content=?2
-WHERE id = ?1;
-
--- name: DeleteGeminiMemory :exec
-DELETE
-FROM gemini_memories
-WHERE id = ?;
-
--- name: ListGeminiMemory :many
-SELECT *
-FROM gemini_memories
-WHERE chat_id = ?
-  AND topic_id = ?
-LIMIT ?;

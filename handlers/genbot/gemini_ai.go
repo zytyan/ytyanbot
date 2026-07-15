@@ -63,7 +63,6 @@ func getGenAiClient() *genai.Client {
 const (
 	geminiSessionContentLimit = 200
 	geminiSessionWindowStep   = 50
-	geminiMemoriesLimit       = 60
 )
 
 type geminiTopic struct {
@@ -126,7 +125,6 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 		return nil
 	}
 	msg := ctx.EffectiveMessage
-	topic := newTopic(msg)
 	genCtx, cancel := context.WithTimeout(context.Background(), time.Minute*15)
 	defer cancel()
 	text := msg.GetText()
@@ -138,13 +136,6 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	promptReplacer := getSysPrompt(msg)
-	if promptReplacer.NeedsMemories() && len(session.Memories) == 0 {
-		memories, err := g.Q.ListGeminiMemory(genCtx, topic.chatId, topic.topicId, 30)
-		if err != nil {
-			return err
-		}
-		session.Memories = memories
-	}
 	setReaction(bot, msg, "👀")
 
 	sysPromptCtx := ReplaceCtx{
@@ -152,9 +143,6 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 		Msg:    ctx.EffectiveMessage,
 		Now:    time.Now(),
 		Stable: true,
-	}
-	for _, mem := range session.Memories {
-		sysPromptCtx.Memories = append(sysPromptCtx.Memories, mem.Content)
 	}
 	sysPrompt := promptReplacer.Replace(&sysPromptCtx)
 	config := &genai.GenerateContentConfig{

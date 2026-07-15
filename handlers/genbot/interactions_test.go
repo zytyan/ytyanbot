@@ -221,10 +221,9 @@ func bytesJoinRaw(steps []json.RawMessage) []byte {
 	return result
 }
 
-func TestDefaultPromptOmitsMemoriesButCustomPromptKeepsCompatibility(t *testing.T) {
+func TestLegacyMemoryPromptVariableIsRemoved(t *testing.T) {
 	require.NotContains(t, gDefaultSysPrompt, "%MEMORIES%")
 	require.NotContains(t, gDefaultSysPrompt, "长期保留的记忆")
-	require.False(t, geminiSysPromptReplacer.NeedsMemories())
-	custom := NewReplacer("memory=%MEMORIES%")
-	require.True(t, custom.NeedsMemories())
+	_, exists := replaceMetaVar["MEMORIES"]
+	require.False(t, exists)
 }

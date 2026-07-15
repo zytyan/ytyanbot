@@ -27,3 +27,4 @@ These instructions apply to the whole repository.
 - Do not stop, restart, or replace the live service without explicit approval for that operation.
 - Never commit production configuration, databases, media, logs, secrets, backups, or other runtime files under `build/`.
 - Preserve all AI session, message, token, prompt, provider payload, and media data unless a task explicitly authorizes deletion. The legacy AI memory feature and its data are explicitly approved for removal in the AI database V2 work.
+- The legacy AI memory table, commands, session cache, and `%MEMORIES%` prompt variable have been retired. Do not reintroduce them without a new explicit product requirement.

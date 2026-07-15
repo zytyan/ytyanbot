@@ -1,7 +1,6 @@
 package genbot
 
 import (
-	"bytes"
 	"strconv"
 	"strings"
 	"time"
@@ -15,8 +14,7 @@ type ReplaceCtx struct {
 	Bot *gotgbot.Bot
 	Msg *gotgbot.Message
 
-	Memories []string
-	Stable   bool
+	Stable bool
 }
 
 func getChatName(chat gotgbot.Chat) string {
@@ -90,27 +88,10 @@ var replaceMetaVar = map[string]func(ctx *ReplaceCtx) string{
 	"QUOTE": func(ctx *ReplaceCtx) string {
 		return "不可用"
 	},
-	"MEMORIES": func(ctx *ReplaceCtx) string {
-		if len(ctx.Memories) == 0 {
-			return "当前没有记忆"
-		}
-		buf := bytes.NewBuffer(nil)
-		for i, m := range ctx.Memories {
-			buf.WriteString(strconv.FormatInt(int64(i)+1, 10))
-			buf.WriteString(". ")
-			buf.WriteString(m)
-		}
-		return buf.String()
-	},
 }
 
 type Replacer struct {
-	replaceFunc   []func(ctx *ReplaceCtx) string
-	needsMemories bool
-}
-
-func (r *Replacer) NeedsMemories() bool {
-	return r != nil && r.needsMemories
+	replaceFunc []func(ctx *ReplaceCtx) string
 }
 
 func (r *Replacer) Replace(ctx *ReplaceCtx) string {
@@ -151,8 +132,6 @@ func NewReplacer(tpl string) Replacer {
 	}
 	partsLen := strings.Count(tpl, "%")/2 + 1
 	parts := make([]func(ctx *ReplaceCtx) string, 0, partsLen)
-	needsMemories := false
-
 	emitConst := func(s string) {
 		if s == "" {
 			return
@@ -223,9 +202,6 @@ func NewReplacer(tpl string) Replacer {
 		// 合法变量名：查白名单
 		if fn, ok := replaceMetaVar[varName]; ok {
 			parts = append(parts, fn)
-			if varName == "MEMORIES" {
-				needsMemories = true
-			}
 		} else {
 			// 未知变量：保留原样，便于用户发现写错
 			raw := tpl[i : j+1]
@@ -241,5 +217,5 @@ func NewReplacer(tpl string) Replacer {
 		emitConst(tpl[lastText:])
 	}
 
-	return Replacer{replaceFunc: parts, needsMemories: needsMemories}
+	return Replacer{replaceFunc: parts}
 }

@@ -33,9 +33,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.createChatCfgStmt, err = db.PrepareContext(ctx, createChatCfg); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateChatCfg: %w", err)
 	}
-	if q.createGeminiMemoryStmt, err = db.PrepareContext(ctx, createGeminiMemory); err != nil {
-		return nil, fmt.Errorf("error preparing query CreateGeminiMemory: %w", err)
-	}
 	if q.createNewGeminiSessionStmt, err = db.PrepareContext(ctx, createNewGeminiSession); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateNewGeminiSession: %w", err)
 	}
@@ -44,9 +41,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.delCocCharAttrStmt, err = db.PrepareContext(ctx, delCocCharAttr); err != nil {
 		return nil, fmt.Errorf("error preparing query DelCocCharAttr: %w", err)
-	}
-	if q.deleteGeminiMemoryStmt, err = db.PrepareContext(ctx, deleteGeminiMemory); err != nil {
-		return nil, fmt.Errorf("error preparing query DeleteGeminiMemory: %w", err)
 	}
 	if q.getBiliInlineDataStmt, err = db.PrepareContext(ctx, getBiliInlineData); err != nil {
 		return nil, fmt.Errorf("error preparing query GetBiliInlineData: %w", err)
@@ -81,9 +75,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.incrementSessionTokenCountersStmt, err = db.PrepareContext(ctx, incrementSessionTokenCounters); err != nil {
 		return nil, fmt.Errorf("error preparing query IncrementSessionTokenCounters: %w", err)
 	}
-	if q.listGeminiMemoryStmt, err = db.PrepareContext(ctx, listGeminiMemory); err != nil {
-		return nil, fmt.Errorf("error preparing query ListGeminiMemory: %w", err)
-	}
 	if q.listNsfwPicUserRatesByFileUidStmt, err = db.PrepareContext(ctx, listNsfwPicUserRatesByFileUid); err != nil {
 		return nil, fmt.Errorf("error preparing query ListNsfwPicUserRatesByFileUid: %w", err)
 	}
@@ -104,9 +95,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.updateChatTopicNameStmt, err = db.PrepareContext(ctx, updateChatTopicName); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateChatTopicName: %w", err)
-	}
-	if q.updateGeminiMemoryStmt, err = db.PrepareContext(ctx, updateGeminiMemory); err != nil {
-		return nil, fmt.Errorf("error preparing query UpdateGeminiMemory: %w", err)
 	}
 	if q.updateYtDlpCacheStmt, err = db.PrepareContext(ctx, updateYtDlpCache); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateYtDlpCache: %w", err)
@@ -188,11 +176,6 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing createChatCfgStmt: %w", cerr)
 		}
 	}
-	if q.createGeminiMemoryStmt != nil {
-		if cerr := q.createGeminiMemoryStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing createGeminiMemoryStmt: %w", cerr)
-		}
-	}
 	if q.createNewGeminiSessionStmt != nil {
 		if cerr := q.createNewGeminiSessionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createNewGeminiSessionStmt: %w", cerr)
@@ -206,11 +189,6 @@ func (q *Queries) Close() error {
 	if q.delCocCharAttrStmt != nil {
 		if cerr := q.delCocCharAttrStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing delCocCharAttrStmt: %w", cerr)
-		}
-	}
-	if q.deleteGeminiMemoryStmt != nil {
-		if cerr := q.deleteGeminiMemoryStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing deleteGeminiMemoryStmt: %w", cerr)
 		}
 	}
 	if q.getBiliInlineDataStmt != nil {
@@ -268,11 +246,6 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing incrementSessionTokenCountersStmt: %w", cerr)
 		}
 	}
-	if q.listGeminiMemoryStmt != nil {
-		if cerr := q.listGeminiMemoryStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing listGeminiMemoryStmt: %w", cerr)
-		}
-	}
 	if q.listNsfwPicUserRatesByFileUidStmt != nil {
 		if cerr := q.listNsfwPicUserRatesByFileUidStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listNsfwPicUserRatesByFileUidStmt: %w", cerr)
@@ -306,11 +279,6 @@ func (q *Queries) Close() error {
 	if q.updateChatTopicNameStmt != nil {
 		if cerr := q.updateChatTopicNameStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateChatTopicNameStmt: %w", cerr)
-		}
-	}
-	if q.updateGeminiMemoryStmt != nil {
-		if cerr := q.updateGeminiMemoryStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing updateGeminiMemoryStmt: %w", cerr)
 		}
 	}
 	if q.updateYtDlpCacheStmt != nil {
@@ -455,11 +423,9 @@ type Queries struct {
 	addGeminiMessageStmt                 *sql.Stmt
 	createBiliInlineDataStmt             *sql.Stmt
 	createChatCfgStmt                    *sql.Stmt
-	createGeminiMemoryStmt               *sql.Stmt
 	createNewGeminiSessionStmt           *sql.Stmt
 	createOrUpdateGeminiSystemPromptStmt *sql.Stmt
 	delCocCharAttrStmt                   *sql.Stmt
-	deleteGeminiMemoryStmt               *sql.Stmt
 	getBiliInlineDataStmt                *sql.Stmt
 	getCocCharAllAttrStmt                *sql.Stmt
 	getCocCharAttrStmt                   *sql.Stmt
@@ -471,7 +437,6 @@ type Queries struct {
 	getYtDlpDbCacheStmt                  *sql.Stmt
 	incYtDlUploadCountStmt               *sql.Stmt
 	incrementSessionTokenCountersStmt    *sql.Stmt
-	listGeminiMemoryStmt                 *sql.Stmt
 	listNsfwPicUserRatesByFileUidStmt    *sql.Stmt
 	resetGeminiSystemPromptStmt          *sql.Stmt
 	setCocCharAttrStmt                   *sql.Stmt
@@ -479,7 +444,6 @@ type Queries struct {
 	updateBiliInlineMsgIdStmt            *sql.Stmt
 	updateChatStatDailyStmt              *sql.Stmt
 	updateChatTopicNameStmt              *sql.Stmt
-	updateGeminiMemoryStmt               *sql.Stmt
 	updateYtDlpCacheStmt                 *sql.Stmt
 	createChatStatDailyStmt              *sql.Stmt
 	createNewUserStmt                    *sql.Stmt
@@ -509,11 +473,9 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		addGeminiMessageStmt:                 q.addGeminiMessageStmt,
 		createBiliInlineDataStmt:             q.createBiliInlineDataStmt,
 		createChatCfgStmt:                    q.createChatCfgStmt,
-		createGeminiMemoryStmt:               q.createGeminiMemoryStmt,
 		createNewGeminiSessionStmt:           q.createNewGeminiSessionStmt,
 		createOrUpdateGeminiSystemPromptStmt: q.createOrUpdateGeminiSystemPromptStmt,
 		delCocCharAttrStmt:                   q.delCocCharAttrStmt,
-		deleteGeminiMemoryStmt:               q.deleteGeminiMemoryStmt,
 		getBiliInlineDataStmt:                q.getBiliInlineDataStmt,
 		getCocCharAllAttrStmt:                q.getCocCharAllAttrStmt,
 		getCocCharAttrStmt:                   q.getCocCharAttrStmt,
@@ -525,7 +487,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getYtDlpDbCacheStmt:                  q.getYtDlpDbCacheStmt,
 		incYtDlUploadCountStmt:               q.incYtDlUploadCountStmt,
 		incrementSessionTokenCountersStmt:    q.incrementSessionTokenCountersStmt,
-		listGeminiMemoryStmt:                 q.listGeminiMemoryStmt,
 		listNsfwPicUserRatesByFileUidStmt:    q.listNsfwPicUserRatesByFileUidStmt,
 		resetGeminiSystemPromptStmt:          q.resetGeminiSystemPromptStmt,
 		setCocCharAttrStmt:                   q.setCocCharAttrStmt,
@@ -533,7 +494,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateBiliInlineMsgIdStmt:            q.updateBiliInlineMsgIdStmt,
 		updateChatStatDailyStmt:              q.updateChatStatDailyStmt,
 		updateChatTopicNameStmt:              q.updateChatTopicNameStmt,
-		updateGeminiMemoryStmt:               q.updateGeminiMemoryStmt,
 		updateYtDlpCacheStmt:                 q.updateYtDlpCacheStmt,
 		createChatStatDailyStmt:              q.createChatStatDailyStmt,
 		createNewUserStmt:                    q.createNewUserStmt,

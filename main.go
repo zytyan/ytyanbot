@@ -257,7 +257,6 @@ func main() {
 	dp.Command("get_sysprompt", genbot.GetGeminiSysPrompt)
 	dp.Command("new_session", genbot.NewGeminiSession)
 	dp.Command("session_id", genbot.GetGeminiSessionId)
-	dp.Command("get_memories", genbot.GetMemories)
 	dp.Command("session_help", genbot.SessionHelp)
 	dp.Command("change_model", genbot.ChangeGeminiModel)
 	dp.Command("model", genbot.ChangeGeminiModel)

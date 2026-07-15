@@ -1,7 +1,6 @@
 package genbot
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -45,34 +44,10 @@ func GetGeminiSessionId(bot *gotgbot.Bot, ctx *ext.Context) error {
 	return err
 }
 
-func GetMemories(bot *gotgbot.Bot, ctx *ext.Context) error {
-	msg := ctx.EffectiveMessage
-	topicId := int64(0)
-	if msg.IsTopicMessage {
-		topicId = msg.MessageThreadId
-	}
-	memories, err := g.Q.ListGeminiMemory(context.Background(), msg.Chat.Id, topicId, geminiMemoriesLimit)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		_, _ = msg.Reply(bot, err.Error(), nil)
-		return err
-	}
-	if len(memories) == 0 {
-		_, err = msg.Reply(bot, "当前没有任何记忆", nil)
-		return err
-	}
-	buf := bytes.NewBuffer(nil)
-	for i, m := range memories {
-		_, _ = fmt.Fprintf(buf, "%d. %s\n", i+1, m.Content)
-	}
-	_, err = msg.Reply(bot, buf.String(), nil)
-	return err
-}
-
 func SessionHelp(bot *gotgbot.Bot, ctx *ext.Context) error {
 	text := `会话相关帮助：
 /new_session 停止当前会话，创建新会话
-/session_id 获取当前会话ID，若回复特定消息，则获取该消息的会话ID
-/get_memories 获取Bot记忆`
+/session_id 获取当前会话ID，若回复特定消息，则获取该消息的会话ID`
 	_, err := ctx.EffectiveMessage.Reply(bot, text, nil)
 	return err
 }

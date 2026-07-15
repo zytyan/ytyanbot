@@ -8,6 +8,7 @@ import (
 	"io"
 	g "main/globalcfg"
 	"main/globalcfg/q"
+	genai "main/handlers/genbot/geminiapi"
 	"net/http"
 	"os"
 	"strings"
@@ -17,7 +18,6 @@ import (
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/genai"
 )
 
 func testContent(msgType, text string) q.GeminiContent {
@@ -350,6 +350,114 @@ func TestReplyPhotoAndVideoUseNormalGeminiMediaParts(t *testing.T) {
 	videoSteps, err := interactionStepsForContents(videoSession.TmpContents, nil)
 	require.NoError(t, err)
 	require.Contains(t, string(bytesJoinRaw(videoSteps)), `"type":"video"`)
+}
+
+func TestBotRepliesWithoutAIResponseMetadataBecomeUserInputAndKeepMedia(t *testing.T) {
+	previousBot := mainBot
+	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot"}}
+	t.Cleanup(func() { mainBot = previousBot })
+	photoPath := t.TempDir() + "/bot-photo.jpg"
+	videoPath := t.TempDir() + "/bot-video.mp4"
+	require.NoError(t, os.WriteFile(photoPath, []byte("bot-photo-bytes"), 0o600))
+	require.NoError(t, os.WriteFile(videoPath, []byte("bot-video-bytes"), 0o600))
+	bot := &gotgbot.Bot{BotClient: localMediaBotClient{paths: map[string]string{
+		"bot-reply-photo": photoPath, "bot-reply-video": videoPath,
+	}}}
+	botSender := &gotgbot.User{Id: mainBot.Id, FirstName: "bot"}
+	requester := &gotgbot.User{Id: 42, FirstName: "Alice"}
+	tests := []struct {
+		name      string
+		chatID    int64
+		replied   *gotgbot.Message
+		wantBlock string
+	}{
+		{name: "text", chatID: -910107, wantBlock: `"type":"user_input"`,
+			replied: &gotgbot.Message{MessageId: 886001, Date: 120, From: botSender, Text: "non-AI notice"}},
+		{name: "photo", chatID: -910108, wantBlock: `"type":"image"`,
+			replied: &gotgbot.Message{MessageId: 887001, Date: 120, From: botSender,
+				Photo: []gotgbot.PhotoSize{{FileId: "bot-reply-photo", FileUniqueId: "bot-photo-unique"}}}},
+		{name: "video", chatID: -910109, wantBlock: `"type":"video"`,
+			replied: &gotgbot.Message{MessageId: 888001, Date: 120, From: botSender,
+				Video: &gotgbot.Video{FileId: "bot-reply-video", FileUniqueId: "bot-video-unique",
+					Duration: 10, FileSize: int64(len("bot-video-bytes"))}}},
+	}
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.replied.Chat = gotgbot.Chat{Id: test.chatID, Type: "supergroup"}
+			current := &gotgbot.Message{MessageId: test.replied.MessageId + 1, Date: 123,
+				Chat: gotgbot.Chat{Id: test.chatID, Type: "supergroup"}, From: requester,
+				Text: "use the replied message", ReplyToMessage: test.replied}
+			session := &GeminiSession{GeminiSession: q.GeminiSession{ID: int64(820000 + index)},
+				Provider: ProviderGemini}
+			require.NoError(t, session.AddTgMessageWithReply(context.Background(), bot, current))
+			require.Len(t, session.TmpContents, 2)
+			require.Equal(t, genai.RoleUser, session.TmpContents[0].Role,
+				"an unrecorded Bot message must not masquerade as AI assistant history")
+			steps, err := interactionStepsForContents(session.TmpContents, nil)
+			require.NoError(t, err)
+			joined := string(bytesJoinRaw(steps))
+			require.Contains(t, joined, `"type":"user_input"`)
+			require.Contains(t, joined, test.wantBlock)
+		})
+	}
+
+	ctx := context.Background()
+	storedSession, err := g.Q.CreateNewGeminiSession(ctx, -910110, "stored non-AI bot message", "supergroup")
+	require.NoError(t, err)
+	storedNonAI := q.GeminiContent{SessionID: storedSession.ID, ChatID: -910110, MsgID: 889001,
+		Role: genai.RoleModel, SentTime: q.UnixTime{Time: time.Unix(120, 0)}, Username: "bot",
+		MsgType: "text", Text: sql.NullString{String: "legacy non-AI notice", Valid: true}, UserID: mainBot.Id}
+	require.NoError(t, storedNonAI.Save(ctx, g.Q))
+	storedReply := &gotgbot.Message{MessageId: 889001, Date: 120,
+		Chat: gotgbot.Chat{Id: -910110, Type: "supergroup"}, From: botSender, Text: "legacy non-AI notice"}
+	storedCurrent := &gotgbot.Message{MessageId: 889002, Date: 123,
+		Chat: gotgbot.Chat{Id: -910110, Type: "supergroup"}, From: requester,
+		Text: "use this too", ReplyToMessage: storedReply}
+	target := &GeminiSession{GeminiSession: q.GeminiSession{ID: 820110}, Provider: ProviderGemini}
+	require.NoError(t, target.AddTgMessageWithReply(ctx, bot, storedCurrent))
+	require.Equal(t, genai.RoleUser, target.TmpContents[0].Role,
+		"database presence alone must not classify a Bot message as an AI response")
+	require.Contains(t, target.TmpContextOnlyMsgIDs, int64(889001))
+
+	activeSession, err := g.Q.CreateNewGeminiSession(ctx, -910111, "active legacy non-AI bot message", "supergroup")
+	require.NoError(t, err)
+	activeNonAI := q.GeminiContent{SessionID: activeSession.ID, ChatID: -910111, MsgID: 890001,
+		Role: genai.RoleModel, SentTime: q.UnixTime{Time: time.Unix(120, 0)}, Username: "bot",
+		MsgType: "text", Text: sql.NullString{String: "active legacy notice", Valid: true}, UserID: mainBot.Id}
+	require.NoError(t, activeNonAI.Save(ctx, g.Q))
+	activeReply := &gotgbot.Message{MessageId: 890001, Date: 120,
+		Chat: gotgbot.Chat{Id: -910111, Type: "supergroup"}, From: botSender, Text: "active legacy notice"}
+	activeCurrent := &gotgbot.Message{MessageId: 890002, Date: 123,
+		Chat: gotgbot.Chat{Id: -910111, Type: "supergroup"}, From: requester,
+		Text: "use the active notice", ReplyToMessage: activeReply}
+	activeTarget := &GeminiSession{GeminiSession: activeSession,
+		Provider: ProviderGemini, Contents: []q.GeminiContent{activeNonAI}}
+	require.NoError(t, activeTarget.AddTgMessageWithReply(ctx, bot, activeCurrent))
+	require.Equal(t, genai.RoleUser, activeTarget.Contents[0].Role)
+	require.Len(t, activeTarget.TmpContents, 1, "an active reply must not be appended twice")
+	reloaded, err := g.Q.GetAllMsgInSession(ctx, activeSession.ID, 10)
+	require.NoError(t, err)
+	require.Equal(t, genai.RoleUser, reloaded[0].Role,
+		"the on-use repair must survive a service restart")
+
+	aiSession, err := g.Q.CreateNewGeminiSession(ctx, -910112, "real AI response", "supergroup")
+	require.NoError(t, err)
+	aiContent := q.GeminiContent{SessionID: aiSession.ID, ChatID: -910112, MsgID: 891001,
+		Role: genai.RoleModel, SentTime: q.UnixTime{Time: time.Unix(120, 0)}, Username: "bot",
+		MsgType: "text", Text: sql.NullString{String: "real AI answer", Valid: true}, UserID: mainBot.Id}
+	require.NoError(t, aiContent.Save(ctx, g.Q))
+	require.NoError(t, g.SetAIMessageUsage(ctx, aiSession.ID, 891001, -910112,
+		ProviderGemini, ModelGeminiFlash, 10, 2, 0))
+	aiReply := &gotgbot.Message{MessageId: 891001, Date: 120,
+		Chat: gotgbot.Chat{Id: -910112, Type: "supergroup"}, From: botSender, Text: "real AI answer"}
+	aiCurrent := &gotgbot.Message{MessageId: 891002, Date: 123,
+		Chat: gotgbot.Chat{Id: -910112, Type: "supergroup"}, From: requester,
+		Text: "continue", ReplyToMessage: aiReply}
+	aiTarget := &GeminiSession{GeminiSession: aiSession,
+		Provider: ProviderGemini, Contents: []q.GeminiContent{aiContent}}
+	require.NoError(t, aiTarget.AddTgMessageWithReply(ctx, bot, aiCurrent))
+	require.Equal(t, genai.RoleModel, aiTarget.Contents[0].Role,
+		"a recorded AI response must remain assistant history")
 }
 
 func TestCaptionlessDeepSeekReplyVideoIsSkippedWithoutPersistenceFailure(t *testing.T) {

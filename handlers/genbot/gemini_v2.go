@@ -3,11 +3,11 @@ package genbot
 import (
 	"fmt"
 	"main/globalcfg/h"
+	genai "main/handlers/genbot/geminiapi"
 	"main/helpers/ent2md"
 	"time"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
-	"google.golang.org/genai"
 )
 
 func tgMsgToGenaiContent(bot *gotgbot.Bot, msg *gotgbot.Message) (*genai.Content, error) {

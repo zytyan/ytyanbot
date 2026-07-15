@@ -14,9 +14,9 @@ import (
 
 	g "main/globalcfg"
 	"main/globalcfg/q"
+	genai "main/handlers/genbot/geminiapi"
 
 	"github.com/stretchr/testify/require"
-	"google.golang.org/genai"
 )
 
 const liveCacheSessionID = int64(103)

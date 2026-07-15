@@ -359,6 +359,21 @@ func GetAIMessageUsage(ctx context.Context, chatID, msgID int64) (usage AIMessag
 	return getAIMessageUsage(ctx, db, chatID, msgID)
 }
 
+func HasAIMessageResponse(ctx context.Context, chatID, msgID int64) (bool, error) {
+	var exists bool
+	err := db.QueryRowContext(ctx, `SELECT EXISTS(
+SELECT 1 FROM ai_message_meta WHERE chat_id = ? AND msg_id = ?)`, chatID, msgID).Scan(&exists)
+	return exists, err
+}
+
+func MarkMessageAsUserInput(ctx context.Context, chatID, msgID int64) error {
+	_, err := db.ExecContext(ctx, `UPDATE gemini_contents SET role = 'user'
+WHERE chat_id = ? AND msg_id = ? AND NOT EXISTS (
+    SELECT 1 FROM ai_message_meta WHERE chat_id = ? AND msg_id = ?)`,
+		chatID, msgID, chatID, msgID)
+	return err
+}
+
 func getAIMessageUsage(ctx context.Context, database *sql.DB, chatID, msgID int64) (usage AIMessageUsage, err error) {
 	err = database.QueryRowContext(ctx, `SELECT session_id, provider, model, input_tokens, output_tokens, cached_input_tokens,
 input_message_count, input_first_msg_id, input_last_msg_id

@@ -8,11 +8,10 @@ import (
 	"errors"
 	"fmt"
 	g "main/globalcfg"
+	genai "main/handlers/genbot/geminiapi"
 	"net/http"
 	"strings"
 	"time"
-
-	"google.golang.org/genai"
 )
 
 const (

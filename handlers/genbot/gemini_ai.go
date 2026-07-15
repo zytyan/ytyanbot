@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	g "main/globalcfg"
 	"main/globalcfg/h"
+	genai "main/handlers/genbot/geminiapi"
 	"main/helpers/mdnormalizer"
 	"math/rand/v2"
 	"regexp"
@@ -19,7 +20,6 @@ import (
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
-	"google.golang.org/genai"
 )
 
 var reReplyToSession = regexp.MustCompile(`@\d+`)

@@ -8,13 +8,13 @@ import (
 	"io"
 	g "main/globalcfg"
 	"main/globalcfg/q"
+	genai "main/handlers/genbot/geminiapi"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"google.golang.org/genai"
 )
 
 func interactionTestContent(id int64, role string, text string) q.GeminiContent {

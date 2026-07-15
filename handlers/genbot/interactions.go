@@ -11,11 +11,10 @@ import (
 	"log/slog"
 	g "main/globalcfg"
 	"main/globalcfg/q"
+	genai "main/handlers/genbot/geminiapi"
 	"net/http"
 	"strings"
 	"time"
-
-	"google.golang.org/genai"
 )
 
 const (

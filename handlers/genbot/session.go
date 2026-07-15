@@ -11,13 +11,13 @@ import (
 	g "main/globalcfg"
 	"main/globalcfg/h"
 	"main/globalcfg/q"
+	genai "main/handlers/genbot/geminiapi"
 	"main/helpers/ent2md"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
-	"google.golang.org/genai"
 )
 
 type GeminiSession struct {
@@ -222,6 +222,10 @@ func (s *GeminiSession) ToDeepSeekMessages(systemPrompt string) ([]deepSeekMessa
 }
 
 func (s *GeminiSession) AddTgMessage(bot *gotgbot.Bot, msg *gotgbot.Message) (err error) {
+	return s.addTgMessage(bot, msg, "")
+}
+
+func (s *GeminiSession) addTgMessage(bot *gotgbot.Bot, msg *gotgbot.Message, roleOverride string) (err error) {
 	if msg == nil {
 		return nil
 	}
@@ -238,6 +242,9 @@ func (s *GeminiSession) AddTgMessage(bot *gotgbot.Bot, msg *gotgbot.Message) (er
 	role := genai.RoleUser
 	if msg.GetSender().Id() == mainBot.Id {
 		role = genai.RoleModel
+	}
+	if roleOverride != "" {
+		role = roleOverride
 	}
 	username := msg.GetSender().Username()
 	content := q.GeminiContent{
@@ -338,11 +345,37 @@ func (s *GeminiSession) containsMessage(msgID int64) bool {
 	return false
 }
 
+func (s *GeminiSession) setMessageRole(msgID int64, role string) {
+	for i := range s.Contents {
+		if s.Contents[i].MsgID == msgID {
+			s.Contents[i].Role = role
+		}
+	}
+	for i := range s.TmpContents {
+		if s.TmpContents[i].MsgID == msgID {
+			s.TmpContents[i].Role = role
+		}
+	}
+}
+
 // AddTgMessageWithReply appends a directly replied-to message when it is not
 // already part of the active chain, then appends the current user message.
 func (s *GeminiSession) AddTgMessageWithReply(ctx context.Context, bot *gotgbot.Bot, msg *gotgbot.Message) error {
 	if msg == nil {
 		return nil
+	}
+	if replied := msg.ReplyToMessage; replied != nil && s.containsMessage(replied.MessageId) &&
+		replied.GetSender().Id() == mainBot.Id {
+		isAIResponse, err := g.HasAIMessageResponse(ctx, msg.Chat.Id, replied.MessageId)
+		if err != nil {
+			return err
+		}
+		if !isAIResponse {
+			if err = g.MarkMessageAsUserInput(ctx, msg.Chat.Id, replied.MessageId); err != nil {
+				return err
+			}
+			s.setMessageRole(replied.MessageId, genai.RoleUser)
+		}
 	}
 	if replied := msg.ReplyToMessage; replied != nil && !s.containsMessage(replied.MessageId) {
 		// A message already present anywhere in the database may have fallen out
@@ -353,12 +386,31 @@ func (s *GeminiSession) AddTgMessageWithReply(ctx context.Context, bot *gotgbot.
 		if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
 			return lookupErr
 		}
+		isAIResponse := false
+		if contextOnly {
+			isAIResponse, lookupErr = g.HasAIMessageResponse(ctx, msg.Chat.Id, replied.MessageId)
+			if lookupErr != nil {
+				return lookupErr
+			}
+			if !isAIResponse {
+				if lookupErr = g.MarkMessageAsUserInput(ctx, msg.Chat.Id, replied.MessageId); lookupErr != nil {
+					return lookupErr
+				}
+			}
+		}
 		repliedCopy := *replied
 		if repliedCopy.Chat.Id == 0 {
 			repliedCopy.Chat = msg.Chat
 		}
 		before := len(s.TmpContents)
-		if err := s.AddTgMessage(bot, &repliedCopy); err != nil {
+		roleOverride := ""
+		if !isAIResponse {
+			// A Bot-authored message that was never stored as an AI response is
+			// external reference material, not assistant history. Treat the whole
+			// text/media message as user input so provider adapters retain its parts.
+			roleOverride = genai.RoleUser
+		}
+		if err := s.addTgMessage(bot, &repliedCopy, roleOverride); err != nil {
 			return err
 		}
 		if len(s.TmpContents) > before {

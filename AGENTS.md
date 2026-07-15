@@ -29,3 +29,4 @@ These instructions apply to the whole repository.
 - Preserve all AI session, message, token, prompt, provider payload, and media data unless a task explicitly authorizes deletion. The legacy AI memory feature and its data are explicitly approved for removal in the AI database V2 work.
 - The legacy AI memory table, commands, session cache, and `%MEMORIES%` prompt variable have been retired. Do not reintroduce them without a new explicit product requirement.
 - Store AI binary media through `helpers/aimedia`: SHA-256 addressed files are written atomically outside SQLite, verified before use, and garbage collection may delete only objects absent from the database reference set.
+- The generic AI V2 schema and business queries live in `sql/schema_ai_v2.sql` and `sql/query_ai_v2.sql`; sqlc generates their dedicated package at `globalcfg/aiq` while the V1 runtime remains active during staged development.

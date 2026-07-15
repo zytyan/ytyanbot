@@ -240,15 +240,16 @@ SET cached_input_tokens=cached_input_tokens + ? WHERE session_id = ?`, tokens, s
 }
 
 type AIMessageUsage struct {
-	SessionID         int64
-	Provider          string
-	Model             string
-	InputTokens       int64
-	OutputTokens      int64
-	CachedInputTokens int64
-	InputMessageCount int64
-	InputFirstMsgID   int64
-	InputLastMsgID    int64
+	SessionID             int64
+	Provider              string
+	Model                 string
+	InputTokens           int64
+	OutputTokens          int64
+	CachedInputTokens     int64
+	InputMessageCount     int64
+	InputFirstMsgID       int64
+	InputLastMsgID        int64
+	GeminiCacheExpireTime int64
 }
 
 type AIAssistantPayload struct {
@@ -454,10 +455,14 @@ WHERE chat_id = ? AND msg_id = ? AND NOT EXISTS (
 }
 
 func getAIMessageUsage(ctx context.Context, database *sql.DB, chatID, msgID int64) (usage AIMessageUsage, err error) {
-	err = database.QueryRowContext(ctx, `SELECT session_id, provider, model, input_tokens, output_tokens, cached_input_tokens,
-input_message_count, input_first_msg_id, input_last_msg_id
-FROM ai_message_meta WHERE chat_id = ? AND msg_id = ?`, chatID, msgID).Scan(
+	err = database.QueryRowContext(ctx, `SELECT m.session_id, m.provider, m.model, m.input_tokens,
+m.output_tokens, m.cached_input_tokens, m.input_message_count, m.input_first_msg_id,
+m.input_last_msg_id, COALESCE(s.gemini_cache_expire_time, 0)
+FROM ai_message_meta AS m
+LEFT JOIN ai_session_meta AS s ON s.session_id = m.session_id
+WHERE m.chat_id = ? AND m.msg_id = ?`, chatID, msgID).Scan(
 		&usage.SessionID, &usage.Provider, &usage.Model, &usage.InputTokens, &usage.OutputTokens,
-		&usage.CachedInputTokens, &usage.InputMessageCount, &usage.InputFirstMsgID, &usage.InputLastMsgID)
+		&usage.CachedInputTokens, &usage.InputMessageCount, &usage.InputFirstMsgID, &usage.InputLastMsgID,
+		&usage.GeminiCacheExpireTime)
 	return
 }

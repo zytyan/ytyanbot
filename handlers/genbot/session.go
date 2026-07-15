@@ -362,6 +362,13 @@ func (s *GeminiSession) setMessageRole(msgID int64, role string) {
 // AddTgMessageWithReply appends a directly replied-to message when it is not
 // already part of the active chain, then appends the current user message.
 func (s *GeminiSession) AddTgMessageWithReply(ctx context.Context, bot *gotgbot.Bot, msg *gotgbot.Message) error {
+	return s.AddTgMessageWithReplyMode(ctx, bot, msg, false)
+}
+
+// AddTgMessageWithReplyMode behaves like AddTgMessageWithReply. When
+// replyContextOnly is true, the replied-to message is included in this request
+// but is never assigned to the new session or otherwise persisted again.
+func (s *GeminiSession) AddTgMessageWithReplyMode(ctx context.Context, bot *gotgbot.Bot, msg *gotgbot.Message, replyContextOnly bool) error {
 	if msg == nil {
 		return nil
 	}
@@ -379,16 +386,21 @@ func (s *GeminiSession) AddTgMessageWithReply(ctx context.Context, bot *gotgbot.
 		}
 	}
 	if replied := msg.ReplyToMessage; replied != nil && !s.containsMessage(replied.MessageId) {
-		// A message already present anywhere in the database may have fallen out
-		// of the active sliding window. It is request context only here because
-		// gemini_contents has a global (chat_id, msg_id) uniqueness constraint.
-		_, lookupErr := g.Q.GetSessionIdByMessage(ctx, msg.Chat.Id, replied.MessageId)
-		contextOnly := lookupErr == nil
-		if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
-			return lookupErr
+		// A stored message may have fallen out of the active sliding window. It is
+		// request context only because gemini_contents has a global
+		// (chat_id, msg_id) uniqueness constraint. @new also forces an otherwise
+		// unstored reply to remain ephemeral so its session ownership is unchanged.
+		contextOnly := replyContextOnly
+		if !contextOnly {
+			_, lookupErr := g.Q.GetSessionIdByMessage(ctx, msg.Chat.Id, replied.MessageId)
+			contextOnly = lookupErr == nil
+			if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+				return lookupErr
+			}
 		}
 		isAIResponse := false
 		if contextOnly {
+			var lookupErr error
 			isAIResponse, lookupErr = g.HasAIMessageResponse(ctx, msg.Chat.Id, replied.MessageId)
 			if lookupErr != nil {
 				return lookupErr

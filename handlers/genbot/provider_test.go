@@ -258,6 +258,95 @@ func TestAddTgMessageWithReplyDoesNotDuplicateActiveChain(t *testing.T) {
 	require.Equal(t, current.MessageId, session.TmpContents[0].MsgID)
 }
 
+func TestNewSessionRoutingTakesPrecedence(t *testing.T) {
+	createNew, ignoreTimeout, sessionID := parseSessionRouting("continue @last @123 @new")
+	require.True(t, createNew)
+	require.False(t, ignoreTimeout)
+	require.Zero(t, sessionID)
+
+	createNew, ignoreTimeout, sessionID = parseSessionRouting("continue @last @123")
+	require.False(t, createNew)
+	require.True(t, ignoreTimeout)
+	require.Zero(t, sessionID)
+
+	createNew, ignoreTimeout, sessionID = parseSessionRouting("continue @123")
+	require.False(t, createNew)
+	require.False(t, ignoreTimeout)
+	require.Equal(t, int64(123), sessionID)
+
+	previousBot := mainBot
+	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot", Username: "testbot"}}
+	t.Cleanup(func() { mainBot = previousBot })
+	require.True(t, IsGeminiReq(&gotgbot.Message{
+		Text: "@new", From: &gotgbot.User{Id: 42},
+		ReplyToMessage: &gotgbot.Message{From: &gotgbot.User{Id: 7}},
+	}))
+}
+
+func TestNewSessionReplyIsContextOnlyAndKeepsOriginalSessionOwnership(t *testing.T) {
+	ctx := context.Background()
+	previousBot := mainBot
+	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot"}}
+	t.Cleanup(func() { mainBot = previousBot })
+
+	const chatID int64 = -910113
+	oldSession, err := g.Q.CreateNewGeminiSession(ctx, chatID, "old", "supergroup")
+	require.NoError(t, err)
+	oldReply := q.GeminiContent{SessionID: oldSession.ID, ChatID: chatID, MsgID: 892001,
+		Role: genai.RoleUser, SentTime: q.UnixTime{Time: time.Unix(120, 0)}, Username: "Bob",
+		MsgType: "text", Text: sql.NullString{String: "old session message", Valid: true}, UserID: 7}
+	require.NoError(t, oldReply.Save(ctx, g.Q))
+
+	newSession, err := g.Q.CreateNewGeminiSession(ctx, chatID, "new", "supergroup")
+	require.NoError(t, err)
+	replied := &gotgbot.Message{MessageId: oldReply.MsgID, Date: 120,
+		Chat: gotgbot.Chat{Id: chatID, Type: "supergroup"},
+		From: &gotgbot.User{Id: 7, FirstName: "Bob"}, Text: "old session message"}
+	current := &gotgbot.Message{MessageId: 892002, Date: 123,
+		Chat: gotgbot.Chat{Id: chatID, Type: "supergroup"},
+		From: &gotgbot.User{Id: 42, FirstName: "Alice"}, Text: "@new continue", ReplyToMessage: replied}
+	session := &GeminiSession{GeminiSession: newSession, Provider: ProviderGemini}
+	require.NoError(t, session.AddTgMessageWithReplyMode(ctx, nil, current, true))
+	require.Len(t, session.TmpContents, 2, "the replied message is still sent as new-session context")
+	require.Contains(t, session.TmpContextOnlyMsgIDs, oldReply.MsgID)
+	require.NoError(t, session.PersistTmpUpdates(ctx))
+
+	replySessionID, err := g.Q.GetSessionIdByMessage(ctx, chatID, oldReply.MsgID)
+	require.NoError(t, err)
+	require.Equal(t, oldSession.ID, replySessionID)
+	currentSessionID, err := g.Q.GetSessionIdByMessage(ctx, chatID, current.MessageId)
+	require.NoError(t, err)
+	require.Equal(t, newSession.ID, currentSessionID)
+}
+
+func TestNewSessionReplyWithoutSessionRemainsUnassigned(t *testing.T) {
+	ctx := context.Background()
+	previousBot := mainBot
+	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot"}}
+	t.Cleanup(func() { mainBot = previousBot })
+
+	const chatID int64 = -910114
+	newSession, err := g.Q.CreateNewGeminiSession(ctx, chatID, "new", "supergroup")
+	require.NoError(t, err)
+	replied := &gotgbot.Message{MessageId: 893001, Date: 120,
+		Chat: gotgbot.Chat{Id: chatID, Type: "supergroup"},
+		From: &gotgbot.User{Id: 7, FirstName: "Bob"}, Text: "unassigned message"}
+	current := &gotgbot.Message{MessageId: 893002, Date: 123,
+		Chat: gotgbot.Chat{Id: chatID, Type: "supergroup"},
+		From: &gotgbot.User{Id: 42, FirstName: "Alice"}, Text: "@new continue", ReplyToMessage: replied}
+	session := &GeminiSession{GeminiSession: newSession, Provider: ProviderGemini}
+	require.NoError(t, session.AddTgMessageWithReplyMode(ctx, nil, current, true))
+	require.Len(t, session.TmpContents, 2)
+	require.Contains(t, session.TmpContextOnlyMsgIDs, replied.MessageId)
+	require.NoError(t, session.PersistTmpUpdates(ctx))
+
+	_, err = g.Q.GetSessionIdByMessage(ctx, chatID, replied.MessageId)
+	require.ErrorIs(t, err, sql.ErrNoRows)
+	currentSessionID, err := g.Q.GetSessionIdByMessage(ctx, chatID, current.MessageId)
+	require.NoError(t, err)
+	require.Equal(t, newSession.ID, currentSessionID)
+}
+
 func TestReplyOutsideActiveWindowIsContextOnlyAndDoesNotDuplicateDatabaseRow(t *testing.T) {
 	ctx := context.Background()
 	previousBot := mainBot
@@ -759,8 +848,14 @@ func TestUsageButtonAndAlertFormatting(t *testing.T) {
 		SessionID: 7763, Model: ModelDeepSeekFlash, InputTokens: 27014, OutputTokens: 32,
 		CachedInputTokens: 27008, InputMessageCount: 174, InputFirstMsgID: 100, InputLastMsgID: 274,
 	})
-	require.Equal(t, "ID: 7763\n消息: 174（100-274）\n模型: deepseek-v4-flash\n输入: 27.01 ktoken\n输出: 0.03 ktoken\n缓存: 27.01 ktoken", alert)
+	require.Equal(t, "ID: 7763\n消息: 174（100-274）\n模型: deepseek-v4-flash\n输入: 27.01 ktoken\n输出: 0.03 ktoken\n缓存: 27.01 ktoken\n缓存到期：无显式缓存", alert)
 	require.LessOrEqual(t, len([]rune(alert)), 200)
+
+	cacheExpire := time.Date(2026, 7, 15, 3, 22, 33, 0, time.UTC).Unix()
+	alert = formatUsageAlert(g.AIMessageUsage{
+		SessionID: 7763, Model: ModelGeminiFlash, GeminiCacheExpireTime: cacheExpire,
+	})
+	require.Contains(t, alert, "缓存到期：2026-07-15 11:22:33")
 
 	longAlert := formatUsageAlert(g.AIMessageUsage{Model: strings.Repeat("模", 300)})
 	require.Len(t, []rune(longAlert), 200)

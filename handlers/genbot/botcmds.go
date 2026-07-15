@@ -8,6 +8,7 @@ import (
 	g "main/globalcfg"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
@@ -227,16 +228,23 @@ func formatKTokens(tokens int64) string {
 	return fmt.Sprintf("%.2f ktoken", float64(tokens)/1000)
 }
 
+func formatExplicitCacheExpireTime(expireTime int64) string {
+	if expireTime == 0 {
+		return "无显式缓存"
+	}
+	return time.Unix(expireTime, 0).In(shanghaiLocation).Format("2006-01-02 15:04:05")
+}
+
 func formatUsageAlert(usage g.AIMessageUsage) string {
 	messageSummary := "未记录"
 	if usage.InputMessageCount > 0 {
 		messageSummary = fmt.Sprintf("%d（%d-%d）", usage.InputMessageCount,
 			usage.InputFirstMsgID, usage.InputLastMsgID)
 	}
-	text := fmt.Sprintf("ID: %d\n消息: %s\n模型: %s\n输入: %s\n输出: %s\n缓存: %s",
+	text := fmt.Sprintf("ID: %d\n消息: %s\n模型: %s\n输入: %s\n输出: %s\n缓存: %s\n缓存到期：%s",
 		usage.SessionID, messageSummary,
 		usage.Model, formatKTokens(usage.InputTokens), formatKTokens(usage.OutputTokens),
-		formatKTokens(usage.CachedInputTokens))
+		formatKTokens(usage.CachedInputTokens), formatExplicitCacheExpireTime(usage.GeminiCacheExpireTime))
 	if utf8.RuneCountInString(text) <= 200 {
 		return text
 	}

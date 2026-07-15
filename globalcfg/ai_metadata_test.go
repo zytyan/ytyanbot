@@ -115,6 +115,10 @@ VALUES (7, 'gemini', 'gemini-3-flash-preview')`)
 	runtimeState, err = getAISessionRuntimeState(context.Background(), database, 7)
 	require.NoError(t, err)
 	require.Equal(t, cacheState, runtimeState)
+	usage, err = getAIMessageUsage(context.Background(), database, -1001, 99)
+	require.NoError(t, err)
+	require.Equal(t, cacheState.GeminiCacheExpireTime, usage.GeminiCacheExpireTime,
+		"historical usage queries must expose the session's current cache expiration")
 
 	require.NoError(t, changeAISessionModel(context.Background(), database, 7,
 		"deepseek", "deepseek-v4-flash"))

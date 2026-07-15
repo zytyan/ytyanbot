@@ -25,6 +25,20 @@ import (
 var reReplyToSession = regexp.MustCompile(`@\d+`)
 var mainBot *gotgbot.Bot
 var log *slog.Logger
+
+func parseSessionRouting(text string) (createNewSession bool, ignoreSessionTimeout bool, replySessionID int64) {
+	if strings.Contains(text, "@new") {
+		return true, false, 0
+	}
+	if strings.Contains(text, "@last") {
+		return false, true, 0
+	}
+	if found := reReplyToSession.FindString(text); found != "" {
+		replySessionID, _ = strconv.ParseInt(found[1:], 10, 64)
+	}
+	return false, false, replySessionID
+}
+
 var client = g.NewPtrLinkedCfg(
 	func(old, new *g.Config) bool {
 		return old.GeminiKey != new.GeminiKey
@@ -72,6 +86,9 @@ func IsGeminiReq(msg *gotgbot.Message) bool {
 	if strings.HasPrefix(text, "/") {
 		return false
 	}
+	if strings.Contains(text, "@new") {
+		return true
+	}
 	if strings.Contains(text, "@"+mainBot.Username) {
 		return true
 	}
@@ -113,14 +130,8 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 	genCtx, cancel := context.WithTimeout(context.Background(), time.Minute*15)
 	defer cancel()
 	text := msg.GetText()
-	ignoreSessionTimeout := false
-	replySessionId := int64(0)
-	if strings.Contains(text, "@last") {
-		ignoreSessionTimeout = true
-	} else if found := reReplyToSession.FindString(text); found != "" {
-		replySessionId, _ = strconv.ParseInt(found[1:], 10, 64)
-	}
-	session := GeminiGetSession(genCtx, msg, false, ignoreSessionTimeout, replySessionId)
+	createNewSession, ignoreSessionTimeout, replySessionId := parseSessionRouting(text)
+	session := GeminiGetSession(genCtx, msg, createNewSession, ignoreSessionTimeout, replySessionId)
 	if session == nil {
 		return nil
 	}
@@ -152,7 +163,7 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 		},
 		ThinkingConfig: &genai.ThinkingConfig{IncludeThoughts: true},
 	}
-	if err := session.AddTgMessageWithReply(genCtx, bot, ctx.EffectiveMessage); err != nil {
+	if err := session.AddTgMessageWithReplyMode(genCtx, bot, ctx.EffectiveMessage, createNewSession); err != nil {
 		return err
 	}
 	if session.AllowCodeExecution {

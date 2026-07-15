@@ -44,7 +44,7 @@ func TestV2QueriesSupportSharedMessagesAndRunLifecycle(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "gemini", settings.DefaultProvider)
-	settings, err = queries.ToggleAIChatSettingsUsage(ctx, 101, -1001)
+	settings, err = queries.ToggleAIChatSettingsUsage(ctx, -1001, "gemini", "gemini-test", 101)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), settings.ShowUsage)
 

@@ -22,7 +22,7 @@ func NewGeminiSession(bot *gotgbot.Bot, ctx *ext.Context) error {
 func GetGeminiSessionId(bot *gotgbot.Bot, ctx *ext.Context) error {
 	msg := ctx.EffectiveMessage
 	if rMsg := msg.ReplyToMessage; rMsg != nil {
-		sessId, err := g.Q.GetSessionIdByMessage(context.Background(), rMsg.Chat.Id, rMsg.MessageId)
+		sessId, err := g.AIQ.GetAISessionIDByMessage(context.Background(), rMsg.Chat.Id, rMsg.MessageId)
 		if errors.Is(err, sql.ErrNoRows) {
 			_, err := ctx.EffectiveMessage.Reply(bot, "您回复的消息不在会话中。", nil)
 			return err

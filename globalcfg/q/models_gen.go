@@ -58,40 +58,6 @@ type ChatTopic struct {
 	Name     string `json:"name"`
 }
 
-type GeminiContent struct {
-	SessionID        int64          `json:"session_id"`
-	ChatID           int64          `json:"chat_id"`
-	MsgID            int64          `json:"msg_id"`
-	Role             string         `json:"role"`
-	SentTime         UnixTime       `json:"sent_time"`
-	Username         string         `json:"username"`
-	MsgType          string         `json:"msg_type"`
-	ReplyToMsgID     sql.NullInt64  `json:"reply_to_msg_id"`
-	Text             sql.NullString `json:"text"`
-	Blob             []byte         `json:"blob"`
-	MimeType         sql.NullString `json:"mime_type"`
-	QuotePart        sql.NullString `json:"quote_part"`
-	ThoughtSignature sql.NullString `json:"thought_signature"`
-	AtableUsername   sql.NullString `json:"atable_username"`
-	UserID           int64          `json:"user_id"`
-}
-
-type GeminiSession struct {
-	ID                int64  `json:"id"`
-	ChatID            int64  `json:"chat_id"`
-	ChatName          string `json:"chat_name"`
-	ChatType          string `json:"chat_type"`
-	Frozen            bool   `json:"frozen"`
-	TotalInputTokens  int64  `json:"total_input_tokens"`
-	TotalOutputTokens int64  `json:"total_output_tokens"`
-}
-
-type GeminiSystemPrompt struct {
-	ChatID   int64  `json:"chat_id"`
-	ThreadID int64  `json:"thread_id"`
-	Prompt   string `json:"prompt"`
-}
-
 type PicRateCounter struct {
 	Rate  int64 `json:"rate"`
 	Count int64 `json:"count"`

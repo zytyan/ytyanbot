@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"main/globalcfg/aiq"
 	"main/globalcfg/q"
 	"main/helpers/azure"
 	"main/helpers/meilisearch"
@@ -282,6 +283,10 @@ func InitConfig() {
 	if err != nil {
 		panic(err)
 	}
+	AIQ, err = aiq.Prepare(context.Background(), db)
+	if err != nil {
+		panic(err)
+	}
 	slog.Info("")
 }
 
@@ -311,6 +316,7 @@ var msgDb *sql.DB
 var meiliWalDb *sql.DB
 
 var Q *q.Queries
+var AIQ *aiq.Queries
 
 const meiliWalSchema = `
 CREATE TABLE IF NOT EXISTS meili_wal

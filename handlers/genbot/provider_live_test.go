@@ -26,17 +26,14 @@ var aiAPITestNotice sync.Once
 
 func loadLiveSession(t *testing.T) *GeminiSession {
 	t.Helper()
-	contents, err := g.Q.GetAllMsgInSession(context.Background(), liveCacheSessionID, geminiSessionContentLimit)
+	ctx := context.Background()
+	row, err := g.AIQ.GetAISession(ctx, liveCacheSessionID)
 	require.NoError(t, err)
-	require.NotEmpty(t, contents)
-	payloads, err := g.GetAISessionAssistantPayloads(context.Background(), liveCacheSessionID)
-	require.NoError(t, err)
-	return &GeminiSession{
-		Contents:          contents,
-		AssistantPayloads: payloads,
-		Provider:          ProviderGemini,
-		Model:             ModelGeminiFlash,
-	}
+	session := &GeminiSession{GeminiSession: sessionFromV2(row)}
+	require.NoError(t, session.loadContentFromDatabase(ctx))
+	require.NotEmpty(t, session.Contents)
+	require.NoError(t, session.loadModel(ctx))
+	return session
 }
 
 func requireLiveAI(t *testing.T) {

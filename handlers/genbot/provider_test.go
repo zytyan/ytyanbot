@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	g "main/globalcfg"
+	"main/globalcfg/aiq"
 	"main/globalcfg/q"
 	genai "main/handlers/genbot/geminiapi"
 	"net/http"
@@ -283,100 +285,6 @@ func TestNewSessionRoutingTakesPrecedence(t *testing.T) {
 	}))
 }
 
-func TestNewSessionReplyIsContextOnlyAndKeepsOriginalSessionOwnership(t *testing.T) {
-	ctx := context.Background()
-	previousBot := mainBot
-	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot"}}
-	t.Cleanup(func() { mainBot = previousBot })
-
-	const chatID int64 = -910113
-	oldSession, err := g.Q.CreateNewGeminiSession(ctx, chatID, "old", "supergroup")
-	require.NoError(t, err)
-	oldReply := q.GeminiContent{SessionID: oldSession.ID, ChatID: chatID, MsgID: 892001,
-		Role: genai.RoleUser, SentTime: q.UnixTime{Time: time.Unix(120, 0)}, Username: "Bob",
-		MsgType: "text", Text: sql.NullString{String: "old session message", Valid: true}, UserID: 7}
-	require.NoError(t, oldReply.Save(ctx, g.Q))
-
-	newSession, err := g.Q.CreateNewGeminiSession(ctx, chatID, "new", "supergroup")
-	require.NoError(t, err)
-	replied := &gotgbot.Message{MessageId: oldReply.MsgID, Date: 120,
-		Chat: gotgbot.Chat{Id: chatID, Type: "supergroup"},
-		From: &gotgbot.User{Id: 7, FirstName: "Bob"}, Text: "old session message"}
-	current := &gotgbot.Message{MessageId: 892002, Date: 123,
-		Chat: gotgbot.Chat{Id: chatID, Type: "supergroup"},
-		From: &gotgbot.User{Id: 42, FirstName: "Alice"}, Text: "@new continue", ReplyToMessage: replied}
-	session := &GeminiSession{GeminiSession: newSession, Provider: ProviderGemini}
-	require.NoError(t, session.AddTgMessageWithReplyMode(ctx, nil, current, true))
-	require.Len(t, session.TmpContents, 2, "the replied message is still sent as new-session context")
-	require.Contains(t, session.TmpContextOnlyMsgIDs, oldReply.MsgID)
-	require.NoError(t, session.PersistTmpUpdates(ctx))
-
-	replySessionID, err := g.Q.GetSessionIdByMessage(ctx, chatID, oldReply.MsgID)
-	require.NoError(t, err)
-	require.Equal(t, oldSession.ID, replySessionID)
-	currentSessionID, err := g.Q.GetSessionIdByMessage(ctx, chatID, current.MessageId)
-	require.NoError(t, err)
-	require.Equal(t, newSession.ID, currentSessionID)
-}
-
-func TestNewSessionReplyWithoutSessionRemainsUnassigned(t *testing.T) {
-	ctx := context.Background()
-	previousBot := mainBot
-	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot"}}
-	t.Cleanup(func() { mainBot = previousBot })
-
-	const chatID int64 = -910114
-	newSession, err := g.Q.CreateNewGeminiSession(ctx, chatID, "new", "supergroup")
-	require.NoError(t, err)
-	replied := &gotgbot.Message{MessageId: 893001, Date: 120,
-		Chat: gotgbot.Chat{Id: chatID, Type: "supergroup"},
-		From: &gotgbot.User{Id: 7, FirstName: "Bob"}, Text: "unassigned message"}
-	current := &gotgbot.Message{MessageId: 893002, Date: 123,
-		Chat: gotgbot.Chat{Id: chatID, Type: "supergroup"},
-		From: &gotgbot.User{Id: 42, FirstName: "Alice"}, Text: "@new continue", ReplyToMessage: replied}
-	session := &GeminiSession{GeminiSession: newSession, Provider: ProviderGemini}
-	require.NoError(t, session.AddTgMessageWithReplyMode(ctx, nil, current, true))
-	require.Len(t, session.TmpContents, 2)
-	require.Contains(t, session.TmpContextOnlyMsgIDs, replied.MessageId)
-	require.NoError(t, session.PersistTmpUpdates(ctx))
-
-	_, err = g.Q.GetSessionIdByMessage(ctx, chatID, replied.MessageId)
-	require.ErrorIs(t, err, sql.ErrNoRows)
-	currentSessionID, err := g.Q.GetSessionIdByMessage(ctx, chatID, current.MessageId)
-	require.NoError(t, err)
-	require.Equal(t, newSession.ID, currentSessionID)
-}
-
-func TestReplyOutsideActiveWindowIsContextOnlyAndDoesNotDuplicateDatabaseRow(t *testing.T) {
-	ctx := context.Background()
-	previousBot := mainBot
-	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot"}}
-	t.Cleanup(func() { mainBot = previousBot })
-	oldSession, err := g.Q.CreateNewGeminiSession(ctx, -910103, "old", "supergroup")
-	require.NoError(t, err)
-	oldContent := q.GeminiContent{SessionID: oldSession.ID, ChatID: -910103, MsgID: 882001,
-		Role: genai.RoleUser, SentTime: q.UnixTime{Time: time.Unix(120, 0)}, Username: "Bob",
-		MsgType: "text", Text: sql.NullString{String: "stored old reply", Valid: true}, UserID: 7}
-	require.NoError(t, oldContent.Save(ctx, g.Q))
-	currentSession, err := g.Q.CreateNewGeminiSession(ctx, -910103, "current", "supergroup")
-	require.NoError(t, err)
-	replied := &gotgbot.Message{MessageId: 882001, Date: 120,
-		Chat: gotgbot.Chat{Id: -910103, Type: "supergroup"},
-		From: &gotgbot.User{Id: 7, FirstName: "Bob"}, Text: "stored old reply"}
-	current := &gotgbot.Message{MessageId: 882002, Date: 123,
-		Chat: gotgbot.Chat{Id: -910103, Type: "supergroup"},
-		From: &gotgbot.User{Id: 42, FirstName: "Alice"}, Text: "new", ReplyToMessage: replied}
-	session := &GeminiSession{GeminiSession: currentSession}
-	require.NoError(t, session.AddTgMessageWithReply(ctx, nil, current))
-	require.Contains(t, session.TmpContextOnlyMsgIDs, int64(882001))
-	require.NoError(t, session.PersistTmpUpdates(ctx))
-	saved, err := g.Q.GetAllMsgInSession(ctx, currentSession.ID, 10)
-	require.NoError(t, err)
-	require.Len(t, saved, 1)
-	require.Equal(t, int64(882002), saved[0].MsgID)
-	require.Len(t, session.Contents, 2, "the replied message remains in the active in-memory chain")
-}
-
 type localMediaBotClient struct {
 	paths map[string]string
 }
@@ -490,268 +398,195 @@ func TestBotRepliesWithoutAIResponseMetadataBecomeUserInputAndKeepMedia(t *testi
 		})
 	}
 
-	ctx := context.Background()
-	storedSession, err := g.Q.CreateNewGeminiSession(ctx, -910110, "stored non-AI bot message", "supergroup")
-	require.NoError(t, err)
-	storedNonAI := q.GeminiContent{SessionID: storedSession.ID, ChatID: -910110, MsgID: 889001,
-		Role: genai.RoleModel, SentTime: q.UnixTime{Time: time.Unix(120, 0)}, Username: "bot",
-		MsgType: "text", Text: sql.NullString{String: "legacy non-AI notice", Valid: true}, UserID: mainBot.Id}
-	require.NoError(t, storedNonAI.Save(ctx, g.Q))
-	storedReply := &gotgbot.Message{MessageId: 889001, Date: 120,
-		Chat: gotgbot.Chat{Id: -910110, Type: "supergroup"}, From: botSender, Text: "legacy non-AI notice"}
-	storedCurrent := &gotgbot.Message{MessageId: 889002, Date: 123,
-		Chat: gotgbot.Chat{Id: -910110, Type: "supergroup"}, From: requester,
-		Text: "use this too", ReplyToMessage: storedReply}
-	target := &GeminiSession{GeminiSession: q.GeminiSession{ID: 820110}, Provider: ProviderGemini}
-	require.NoError(t, target.AddTgMessageWithReply(ctx, bot, storedCurrent))
-	require.Equal(t, genai.RoleUser, target.TmpContents[0].Role,
-		"database presence alone must not classify a Bot message as an AI response")
-	require.Contains(t, target.TmpContextOnlyMsgIDs, int64(889001))
-
-	activeSession, err := g.Q.CreateNewGeminiSession(ctx, -910111, "active legacy non-AI bot message", "supergroup")
-	require.NoError(t, err)
-	activeNonAI := q.GeminiContent{SessionID: activeSession.ID, ChatID: -910111, MsgID: 890001,
-		Role: genai.RoleModel, SentTime: q.UnixTime{Time: time.Unix(120, 0)}, Username: "bot",
-		MsgType: "text", Text: sql.NullString{String: "active legacy notice", Valid: true}, UserID: mainBot.Id}
-	require.NoError(t, activeNonAI.Save(ctx, g.Q))
-	activeReply := &gotgbot.Message{MessageId: 890001, Date: 120,
-		Chat: gotgbot.Chat{Id: -910111, Type: "supergroup"}, From: botSender, Text: "active legacy notice"}
-	activeCurrent := &gotgbot.Message{MessageId: 890002, Date: 123,
-		Chat: gotgbot.Chat{Id: -910111, Type: "supergroup"}, From: requester,
-		Text: "use the active notice", ReplyToMessage: activeReply}
-	activeTarget := &GeminiSession{GeminiSession: activeSession,
-		Provider: ProviderGemini, Contents: []q.GeminiContent{activeNonAI}}
-	require.NoError(t, activeTarget.AddTgMessageWithReply(ctx, bot, activeCurrent))
-	require.Equal(t, genai.RoleUser, activeTarget.Contents[0].Role)
-	require.Len(t, activeTarget.TmpContents, 1, "an active reply must not be appended twice")
-	reloaded, err := g.Q.GetAllMsgInSession(ctx, activeSession.ID, 10)
-	require.NoError(t, err)
-	require.Equal(t, genai.RoleUser, reloaded[0].Role,
-		"the on-use repair must survive a service restart")
-
-	aiSession, err := g.Q.CreateNewGeminiSession(ctx, -910112, "real AI response", "supergroup")
-	require.NoError(t, err)
-	aiContent := q.GeminiContent{SessionID: aiSession.ID, ChatID: -910112, MsgID: 891001,
-		Role: genai.RoleModel, SentTime: q.UnixTime{Time: time.Unix(120, 0)}, Username: "bot",
-		MsgType: "text", Text: sql.NullString{String: "real AI answer", Valid: true}, UserID: mainBot.Id}
-	require.NoError(t, aiContent.Save(ctx, g.Q))
-	require.NoError(t, g.SetAIMessageUsage(ctx, aiSession.ID, 891001, -910112,
-		ProviderGemini, ModelGeminiFlash, 10, 2, 0))
-	aiReply := &gotgbot.Message{MessageId: 891001, Date: 120,
-		Chat: gotgbot.Chat{Id: -910112, Type: "supergroup"}, From: botSender, Text: "real AI answer"}
-	aiCurrent := &gotgbot.Message{MessageId: 891002, Date: 123,
-		Chat: gotgbot.Chat{Id: -910112, Type: "supergroup"}, From: requester,
-		Text: "continue", ReplyToMessage: aiReply}
-	aiTarget := &GeminiSession{GeminiSession: aiSession,
-		Provider: ProviderGemini, Contents: []q.GeminiContent{aiContent}}
-	require.NoError(t, aiTarget.AddTgMessageWithReply(ctx, bot, aiCurrent))
-	require.Equal(t, genai.RoleModel, aiTarget.Contents[0].Role,
-		"a recorded AI response must remain assistant history")
 }
 
-func TestCaptionlessDeepSeekReplyVideoIsSkippedWithoutPersistenceFailure(t *testing.T) {
+func createV2TestSession(t *testing.T, chatID int64, provider, model string) q.GeminiSession {
+	t.Helper()
+	now := time.Now().Unix()
+	row, err := g.AIQ.CreateAISession(context.Background(), aiq.CreateAISessionParams{
+		ChatID: chatID, ChatName: "test", ChatType: "private", Provider: provider, Model: model,
+		CreatedAt: now, UpdatedAt: now,
+	})
+	require.NoError(t, err)
+	return sessionFromV2(row)
+}
+
+func v2TestUserContent(sessionID, chatID, msgID int64, text string) q.GeminiContent {
+	content := testContent("text", text)
+	content.SessionID = sessionID
+	content.ChatID = chatID
+	content.MsgID = msgID
+	content.UserID = 42
+	return content
+}
+
+func TestAIRunLifecyclePersistsRetryStateAndCountsTokensOnce(t *testing.T) {
 	ctx := context.Background()
+	const chatID int64 = -920001
+	stored := createV2TestSession(t, chatID, ProviderGemini, ModelGeminiFlash)
+	previousBot := mainBot
+	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot", Username: "testbot"}}
+	t.Cleanup(func() { mainBot = previousBot })
+
+	session := &GeminiSession{
+		GeminiSession: stored, Provider: ProviderGemini, Model: ModelGeminiFlash,
+		TmpContents: []q.GeminiContent{v2TestUserContent(stored.ID, chatID, 5001, "hello")},
+		GeminiCache: geminiExplicitCacheState{
+			Name: "cachedContents/run", ExpireTime: time.Unix(1_800_000_000, 0),
+			StartMsgID: 5001, EndMsgID: 5001, TokenCount: 5000, Fingerprint: "fingerprint",
+		},
+	}
+	run, err := session.BeginAIRun(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "pending", run.Status)
+	retry, err := session.GetOrBeginAIRun(ctx, chatID, 5001)
+	require.NoError(t, err)
+	require.Equal(t, run.ID, retry.ID)
+
+	result := &AIResult{
+		DisplayText: "answer", Raw: []byte(`{"provider":"raw"}`),
+		AssistantPayload:       []byte(`{"role":"model","parts":[{"text":"answer"}]}`),
+		AssistantPayloadFormat: PayloadFormatGeminiContent,
+		Usage:                  AIUsage{InputTokens: 100, OutputTokens: 20, CachedInputTokens: 80},
+		InteractionID:          "int-persisted", WindowStartMsgID: 5001,
+		InputMessageCount: 1, InputFirstMsgID: 5001, InputLastMsgID: 5001,
+	}
+	require.NoError(t, session.CompleteAIRun(ctx, run.ID, result))
+	require.NoError(t, session.CompleteAIRun(ctx, run.ID, result), "a repeated completion must be idempotent")
+	savedSession, err := g.AIQ.GetAISession(ctx, stored.ID)
+	require.NoError(t, err)
+	require.Equal(t, int64(100), savedSession.TotalInputTokens)
+	require.Equal(t, int64(20), savedSession.TotalOutputTokens)
+	require.Equal(t, int64(80), savedSession.TotalCachedInputTokens)
+	_, err = g.AIQ.GetAISessionProviderState(ctx, stored.ID)
+	require.ErrorIs(t, err, sql.ErrNoRows, "candidate provider state must not be promoted before delivery")
+
+	require.NoError(t, MarkAIRunFailed(ctx, run.ID, "delivery_failed", "telegram", errors.New("send failed")))
+	savedRun, err := g.AIQ.GetAIRun(ctx, run.ID)
+	require.NoError(t, err)
+	require.Equal(t, "delivery_failed", savedRun.Status)
+	require.Equal(t, result.Raw, savedRun.RawPayload)
+	restoredResult := resultFromStoredRun(savedRun)
+	require.Equal(t, result.DisplayText, restoredResult.DisplayText)
+
+	response := &gotgbot.Message{MessageId: 5002, Date: 124, Chat: gotgbot.Chat{Id: chatID, Type: "private"}}
+	require.NoError(t, session.DeliverAIRun(ctx, run.ID, response, restoredResult))
+	usage, err := g.GetAIMessageUsage(ctx, chatID, response.MessageId)
+	require.NoError(t, err)
+	require.Equal(t, int64(80), usage.CachedInputTokens)
+	require.Equal(t, int64(1_800_000_000), usage.GeminiCacheExpireTime,
+		"usage reads the run snapshot instead of mutable session state")
+
+	state, err := g.GetAISessionRuntimeState(ctx, stored.ID)
+	require.NoError(t, err)
+	require.Equal(t, "int-persisted", state.GeminiInteractionID)
+	require.Equal(t, "cachedContents/run", state.GeminiCacheName)
+
+	reloadedRow, err := g.AIQ.GetAISession(ctx, stored.ID)
+	require.NoError(t, err)
+	reloaded := &GeminiSession{GeminiSession: sessionFromV2(reloadedRow)}
+	require.NoError(t, reloaded.loadContentFromDatabase(ctx))
+	require.NoError(t, reloaded.loadModel(ctx))
+	require.Len(t, reloaded.Contents, 2)
+	recovered, err := reloaded.GetOrBeginAIRun(ctx, chatID, 5001)
+	require.NoError(t, err)
+	require.Equal(t, "delivered", recovered.Status)
+}
+
+func TestAIRunFailureAndDuplicateDeliveryRemainTraceable(t *testing.T) {
+	ctx := context.Background()
+	stored := createV2TestSession(t, -920002, ProviderDeepSeek, ModelDeepSeekFlash)
+	session := &GeminiSession{
+		GeminiSession: stored, Provider: ProviderDeepSeek, Model: ModelDeepSeekFlash,
+		TmpContents: []q.GeminiContent{v2TestUserContent(stored.ID, -920002, 6001, "hello")},
+	}
+	run, err := session.BeginAIRun(ctx)
+	require.NoError(t, err)
+	modelErr := errors.New("provider unavailable")
+	require.NoError(t, MarkAIRunFailed(ctx, run.ID, "model_failed", "provider", modelErr))
+	failed, err := g.AIQ.GetAIRun(ctx, run.ID)
+	require.NoError(t, err)
+	require.Equal(t, "model_failed", failed.Status)
+	require.Equal(t, modelErr.Error(), failed.ErrorMessage.String)
+	savedSession, err := g.AIQ.GetAISession(ctx, stored.ID)
+	require.NoError(t, err)
+	require.Zero(t, savedSession.TotalInputTokens)
+	session.DiscardTmpUpdates()
+	require.Len(t, session.Contents, 1, "durably saved input remains in the cached session after failure")
+
+	stored = createV2TestSession(t, -920003, ProviderDeepSeek, ModelDeepSeekFlash)
+	session = &GeminiSession{
+		GeminiSession: stored, Provider: ProviderDeepSeek, Model: ModelDeepSeekFlash,
+		TmpContents: []q.GeminiContent{v2TestUserContent(stored.ID, -920003, 6101, "hello")},
+	}
+	run, err = session.BeginAIRun(ctx)
+	require.NoError(t, err)
+	result := &AIResult{
+		DisplayText: "answer", AssistantPayload: []byte(`{"role":"assistant","content":"answer"}`),
+		AssistantPayloadFormat: PayloadFormatDeepSeekMessage,
+		Usage:                  AIUsage{InputTokens: 10, OutputTokens: 2}, InputMessageCount: 1,
+		InputFirstMsgID: 6101, InputLastMsgID: 6101,
+	}
+	require.NoError(t, session.CompleteAIRun(ctx, run.ID, result))
 	previousBot := mainBot
 	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot"}}
 	t.Cleanup(func() { mainBot = previousBot })
-	dbSession, err := g.Q.CreateNewGeminiSession(ctx, -910106, "deepseek reply video", "supergroup")
-	require.NoError(t, err)
-	user := &gotgbot.User{Id: 42, FirstName: "Alice"}
-	replied := &gotgbot.Message{MessageId: 885001, Date: 120,
-		Chat: gotgbot.Chat{Id: -910106, Type: "supergroup"}, From: user,
-		Video: &gotgbot.Video{FileId: "unused", FileUniqueId: "unused", Duration: 10, FileSize: 10}}
-	current := &gotgbot.Message{MessageId: 885002, Date: 123,
-		Chat: gotgbot.Chat{Id: -910106, Type: "supergroup"}, From: user,
-		Text: "continue", ReplyToMessage: replied}
-	session := &GeminiSession{GeminiSession: dbSession, Provider: ProviderDeepSeek, Model: ModelDeepSeekFlash}
-	require.NoError(t, session.AddTgMessageWithReply(ctx, nil, current))
-	require.Contains(t, session.TmpContextOnlyMsgIDs, int64(885001))
-	messages, err := session.ToDeepSeekMessages("system")
+	response := &gotgbot.Message{MessageId: 6102, Date: 124, Chat: gotgbot.Chat{Id: -920003, Type: "private"}}
+	require.NoError(t, session.DeliverAIRun(ctx, run.ID, response, result))
+	require.Error(t, session.DeliverAIRun(ctx, run.ID, response, result),
+		"a duplicate delivery cannot create another response or advance state twice")
+	messages, err := g.AIQ.ListAISessionMessages(ctx, stored.ID)
 	require.NoError(t, err)
 	require.Len(t, messages, 2)
-	require.Contains(t, messages[1].Content, "continue")
-	require.NoError(t, session.PersistTmpUpdates(ctx))
-	saved, err := g.Q.GetAllMsgInSession(ctx, dbSession.ID, 10)
-	require.NoError(t, err)
-	require.Len(t, saved, 1)
-	require.Equal(t, int64(885002), saved[0].MsgID)
 }
 
-func TestPersistTmpUpdatesStoresBodyPayloadAndUsageAtomically(t *testing.T) {
+func TestAIRunDatabaseFailureRollsBackGeneratedStateAndUsage(t *testing.T) {
 	ctx := context.Background()
-	dbSession, err := g.Q.CreateNewGeminiSession(ctx, -900001, "transaction test", "private")
-	require.NoError(t, err)
-	require.NoError(t, g.SetAISessionModel(ctx, dbSession.ID, ProviderDeepSeek, ModelDeepSeekFlash))
-	previousBot := mainBot
-	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot", Username: "testbot"}}
-	t.Cleanup(func() { mainBot = previousBot })
-
-	userContent := testContent("text", "hello")
-	userContent.SessionID = dbSession.ID
-	userContent.ChatID = -900001
-	userContent.MsgID = 5001
+	stored := createV2TestSession(t, -920005, ProviderGemini, ModelGeminiFlash)
 	session := &GeminiSession{
-		GeminiSession: dbSession,
-		Provider:      ProviderDeepSeek,
-		Model:         ModelDeepSeekFlash,
-		TmpContents:   []q.GeminiContent{userContent},
+		GeminiSession: stored, Provider: ProviderGemini, Model: ModelGeminiFlash,
+		TmpContents: []q.GeminiContent{v2TestUserContent(stored.ID, -920005, 6201, "hello")},
 	}
-	result := &AIResult{
-		DisplayText:            "answer",
-		AssistantPayload:       []byte(`{"role":"assistant","reasoning_content":"think","content":"answer"}`),
-		AssistantPayloadFormat: PayloadFormatDeepSeekMessage,
-		Usage:                  AIUsage{InputTokens: 100, OutputTokens: 20, CachedInputTokens: 80},
-		InteractionID:          "int-persisted",
-		WindowStartMsgID:       5001,
-		InputMessageCount:      1,
-		InputFirstMsgID:        5001,
-		InputLastMsgID:         5001,
-	}
-	session.AddModelMessage(&gotgbot.Message{
-		MessageId: 5002, Date: 123, Chat: gotgbot.Chat{Id: -900001, Type: "private"},
-	}, result)
-	require.NoError(t, session.PersistTmpUpdates(ctx))
-	require.Empty(t, session.TmpContents)
-	require.Empty(t, session.PendingResponses)
-
-	savedContents, err := g.Q.GetAllMsgInSession(ctx, dbSession.ID, 10)
+	run, err := session.BeginAIRun(ctx)
 	require.NoError(t, err)
-	require.Len(t, savedContents, 2)
-	require.Equal(t, "answer", savedContents[1].Text.String)
-	payloads, err := g.GetAISessionAssistantPayloads(ctx, dbSession.ID)
-	require.NoError(t, err)
-	require.Equal(t, result.AssistantPayload, payloads[5002].Payload)
-	usage, err := g.GetAIMessageUsage(ctx, -900001, 5002)
-	require.NoError(t, err)
-	require.Equal(t, int64(80), usage.CachedInputTokens)
-	require.Equal(t, dbSession.ID, usage.SessionID)
-	require.Equal(t, int64(1), usage.InputMessageCount)
-	require.Equal(t, int64(5001), usage.InputFirstMsgID)
-	require.Equal(t, int64(5001), usage.InputLastMsgID)
-	runtimeState, err := g.GetAISessionRuntimeState(ctx, dbSession.ID)
-	require.NoError(t, err)
-	require.Equal(t, "int-persisted", runtimeState.GeminiInteractionID)
-	require.Equal(t, int64(5001), runtimeState.WindowStartMsgID)
-
-	failedDBSession, err := g.Q.CreateNewGeminiSession(ctx, -900002, "rollback test", "private")
-	require.NoError(t, err)
-	duplicate := testContent("text", "duplicate")
-	duplicate.SessionID = failedDBSession.ID
-	duplicate.ChatID = -900002
-	duplicate.MsgID = 6001
-	failed := &GeminiSession{
-		GeminiSession: failedDBSession,
-		Provider:      ProviderDeepSeek,
-		Model:         ModelDeepSeekFlash,
-		TmpContents:   []q.GeminiContent{duplicate, duplicate},
-	}
-	failed.AddModelMessage(&gotgbot.Message{
-		MessageId: 6002, Date: 123, Chat: gotgbot.Chat{Id: -900002, Type: "private"},
-	}, result)
-	require.Error(t, failed.PersistTmpUpdates(ctx))
-	rolledBack, err := g.Q.GetAllMsgInSession(ctx, failedDBSession.ID, 10)
-	require.NoError(t, err)
-	require.Empty(t, rolledBack)
-	_, err = g.GetAIMessageUsage(ctx, -900002, 6002)
-	require.ErrorIs(t, err, sql.ErrNoRows)
-}
-
-func TestExplicitCacheStatePersistsWithResponseAndReloads(t *testing.T) {
-	ctx := context.Background()
-	dbSession, err := g.Q.CreateNewGeminiSession(ctx, -900020, "explicit cache state", "private")
-	require.NoError(t, err)
-	require.NoError(t, g.SetAISessionModel(ctx, dbSession.ID, ProviderGemini, ModelGeminiFlash))
-	previousBot := mainBot
-	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot", Username: "testbot"}}
-	t.Cleanup(func() { mainBot = previousBot })
-
-	userContent := testContent("text", "hello")
-	userContent.SessionID = dbSession.ID
-	userContent.ChatID = -900020
-	userContent.MsgID = 6101
-	expireTime := time.Unix(1_800_000_000, 0)
-	session := &GeminiSession{
-		GeminiSession: dbSession, Provider: ProviderGemini, Model: ModelGeminiFlash,
-		TmpContents: []q.GeminiContent{userContent},
-		GeminiCache: geminiExplicitCacheState{
-			Name: "cachedContents/session-cache", ExpireTime: expireTime,
-			StartMsgID: 6101, EndMsgID: 6101, TokenCount: 5000, Fingerprint: "fingerprint",
-		},
-	}
-	session.AddModelMessage(&gotgbot.Message{
-		MessageId: 6102, Date: 123, Chat: gotgbot.Chat{Id: -900020, Type: "private"},
-	}, &AIResult{
-		DisplayText: "answer", AssistantPayload: []byte(`{"role":"model","parts":[{"text":"answer"}]}`),
-		AssistantPayloadFormat: PayloadFormatGeminiContent, WindowStartMsgID: 6101,
+	err = session.CompleteAIRun(ctx, run.ID, &AIResult{
+		DisplayText: "invalid usage", Usage: AIUsage{InputTokens: -1},
+		InputMessageCount: 1, InputFirstMsgID: 6201, InputLastMsgID: 6201,
 	})
-	require.NoError(t, session.PersistTmpUpdates(ctx))
-
-	runtimeState, err := g.GetAISessionRuntimeState(ctx, dbSession.ID)
-	require.NoError(t, err)
-	require.Equal(t, "cachedContents/session-cache", runtimeState.GeminiCacheName)
-	require.Equal(t, expireTime.Unix(), runtimeState.GeminiCacheExpireTime)
-	require.Equal(t, int64(6101), runtimeState.GeminiCacheStartMsgID)
-	require.Equal(t, int64(6101), runtimeState.GeminiCacheEndMsgID)
-	require.Equal(t, int64(5000), runtimeState.GeminiCacheTokenCount)
-	require.Equal(t, "fingerprint", runtimeState.GeminiCacheFingerprint)
-
-	reloaded := &GeminiSession{GeminiSession: dbSession}
-	require.NoError(t, reloaded.loadContentFromDatabase(ctx))
-	require.NoError(t, reloaded.loadModel(ctx, defaultAIModel))
-	require.Equal(t, session.GeminiCache, reloaded.GeminiCache)
+	require.Error(t, err)
+	savedRun, lookupErr := g.AIQ.GetAIRun(ctx, run.ID)
+	require.NoError(t, lookupErr)
+	require.Equal(t, "pending", savedRun.Status, "the generated transition is atomic")
+	savedSession, lookupErr := g.AIQ.GetAISession(ctx, stored.ID)
+	require.NoError(t, lookupErr)
+	require.Zero(t, savedSession.TotalInputTokens, "failed transactions cannot partially count Token usage")
+	require.NoError(t, MarkAIRunFailed(ctx, run.ID, "persistence_failed", "constraint", err))
+	savedRun, lookupErr = g.AIQ.GetAIRun(ctx, run.ID)
+	require.NoError(t, lookupErr)
+	require.Equal(t, "persistence_failed", savedRun.Status)
 }
 
-func TestPersistedSlidingWindowKeepsFullDatabaseHistory(t *testing.T) {
+func TestSameTelegramMessageCanBranchIntoMultipleSessions(t *testing.T) {
 	ctx := context.Background()
-	dbSession, err := g.Q.CreateNewGeminiSession(ctx, -900003, "window persistence", "private")
+	const chatID int64 = -920004
+	first := createV2TestSession(t, chatID, ProviderGemini, ModelGeminiFlash)
+	second := createV2TestSession(t, chatID, ProviderDeepSeek, ModelDeepSeekFlash)
+	shared := v2TestUserContent(first.ID, chatID, 7001, "shared")
+	firstSession := &GeminiSession{GeminiSession: first, Provider: ProviderGemini, Model: ModelGeminiFlash,
+		TmpContents: []q.GeminiContent{shared}}
+	_, err := firstSession.BeginAIRun(ctx)
 	require.NoError(t, err)
-	require.NoError(t, g.SetAISessionModel(ctx, dbSession.ID, ProviderGemini, ModelGeminiFlash))
-
-	previousBot := mainBot
-	mainBot = &gotgbot.Bot{User: gotgbot.User{Id: 999, FirstName: "bot", Username: "testbot"}}
-	t.Cleanup(func() { mainBot = previousBot })
-
-	session := &GeminiSession{
-		GeminiSession: dbSession, Provider: ProviderGemini, Model: ModelGeminiFlash,
-		AssistantPayloads: make(map[int64]g.AIAssistantPayload),
-	}
-	for id := int64(1); id <= 200; id++ {
-		content := interactionTestContent(id+7000, genai.RoleUser, "history")
-		content.SessionID = dbSession.ID
-		content.ChatID = -900003
-		session.TmpContents = append(session.TmpContents, content)
-	}
-	require.NoError(t, session.PersistTmpUpdates(ctx))
-	require.Len(t, session.Contents, 200)
-
-	current := interactionTestContent(7201, genai.RoleUser, "current")
-	current.SessionID = dbSession.ID
-	current.ChatID = -900003
-	session.TmpContents = []q.GeminiContent{current}
-	window := session.prepareRequestWindow()
-	require.Equal(t, 50, window.Drop)
-	result := &AIResult{
-		DisplayText: "answer", AssistantPayload: []byte(`[{"type":"model_output","content":[{"type":"text","text":"answer"}]}]`),
-		AssistantPayloadFormat: PayloadFormatGeminiInteractionSteps,
-		InteractionID:          "int-window", WindowStartMsgID: window.StartMsgID, WindowDrop: window.Drop,
-	}
-	session.AddModelMessage(&gotgbot.Message{
-		MessageId: 7202, Date: 123, Chat: gotgbot.Chat{Id: -900003, Type: "private"},
-	}, result)
-	require.NoError(t, session.PersistTmpUpdates(ctx))
-	require.Len(t, session.Contents, 152)
-	require.Equal(t, int64(7051), session.Contents[0].MsgID)
-
-	allDatabaseContents, err := g.Q.GetAllMsgInSession(ctx, dbSession.ID, 500)
+	shared.SessionID = second.ID
+	secondSession := &GeminiSession{GeminiSession: second, Provider: ProviderDeepSeek, Model: ModelDeepSeekFlash,
+		TmpContents: []q.GeminiContent{shared}}
+	_, err = secondSession.BeginAIRun(ctx)
 	require.NoError(t, err)
-	require.Len(t, allDatabaseContents, 202)
-
-	reloaded := &GeminiSession{GeminiSession: dbSession}
-	require.NoError(t, reloaded.loadContentFromDatabase(ctx))
-	require.NoError(t, reloaded.loadModel(ctx, defaultAIModel))
-	require.Len(t, reloaded.Contents, 152)
-	require.Equal(t, int64(7051), reloaded.Contents[0].MsgID)
-	require.Equal(t, "int-window", reloaded.GeminiInteractionID)
+	firstMessages, err := g.AIQ.ListAISessionMessages(ctx, first.ID)
+	require.NoError(t, err)
+	secondMessages, err := g.AIQ.ListAISessionMessages(ctx, second.ID)
+	require.NoError(t, err)
+	require.Equal(t, int64(7001), firstMessages[0].MsgID)
+	require.Equal(t, int64(7001), secondMessages[0].MsgID)
 }
 
 func ptr[T any](value T) *T { return &value }

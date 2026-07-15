@@ -30,6 +30,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.addAISessionMessageStmt, err = db.PrepareContext(ctx, addAISessionMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query AddAISessionMessage: %w", err)
 	}
+	if q.clearAISessionHistoryRebuildLossyStmt, err = db.PrepareContext(ctx, clearAISessionHistoryRebuildLossy); err != nil {
+		return nil, fmt.Errorf("error preparing query ClearAISessionHistoryRebuildLossy: %w", err)
+	}
 	if q.createAIRunStmt, err = db.PrepareContext(ctx, createAIRun); err != nil {
 		return nil, fmt.Errorf("error preparing query CreateAIRun: %w", err)
 	}
@@ -48,6 +51,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getAIMessageStmt, err = db.PrepareContext(ctx, getAIMessage); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAIMessage: %w", err)
 	}
+	if q.getAIRunStmt, err = db.PrepareContext(ctx, getAIRun); err != nil {
+		return nil, fmt.Errorf("error preparing query GetAIRun: %w", err)
+	}
 	if q.getAIRunByRequestStmt, err = db.PrepareContext(ctx, getAIRunByRequest); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAIRunByRequest: %w", err)
 	}
@@ -57,6 +63,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getAISessionStmt, err = db.PrepareContext(ctx, getAISession); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAISession: %w", err)
 	}
+	if q.getAISessionIDByMessageStmt, err = db.PrepareContext(ctx, getAISessionIDByMessage); err != nil {
+		return nil, fmt.Errorf("error preparing query GetAISessionIDByMessage: %w", err)
+	}
 	if q.getAISessionProviderStateStmt, err = db.PrepareContext(ctx, getAISessionProviderState); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAISessionProviderState: %w", err)
 	}
@@ -65,6 +74,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.getMediaObjectStmt, err = db.PrepareContext(ctx, getMediaObject); err != nil {
 		return nil, fmt.Errorf("error preparing query GetMediaObject: %w", err)
+	}
+	if q.getNextAISessionMessagePositionStmt, err = db.PrepareContext(ctx, getNextAISessionMessagePosition); err != nil {
+		return nil, fmt.Errorf("error preparing query GetNextAISessionMessagePosition: %w", err)
 	}
 	if q.incrementAISessionUsageStmt, err = db.PrepareContext(ctx, incrementAISessionUsage); err != nil {
 		return nil, fmt.Errorf("error preparing query IncrementAISessionUsage: %w", err)
@@ -78,11 +90,17 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listAIMessageMediaStmt, err = db.PrepareContext(ctx, listAIMessageMedia); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAIMessageMedia: %w", err)
 	}
+	if q.listAISessionAssistantRunsStmt, err = db.PrepareContext(ctx, listAISessionAssistantRuns); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAISessionAssistantRuns: %w", err)
+	}
 	if q.listAISessionMessagesStmt, err = db.PrepareContext(ctx, listAISessionMessages); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAISessionMessages: %w", err)
 	}
 	if q.listReferencedMediaHashesStmt, err = db.PrepareContext(ctx, listReferencedMediaHashes); err != nil {
 		return nil, fmt.Errorf("error preparing query ListReferencedMediaHashes: %w", err)
+	}
+	if q.markAIMessageAsUserInputStmt, err = db.PrepareContext(ctx, markAIMessageAsUserInput); err != nil {
+		return nil, fmt.Errorf("error preparing query MarkAIMessageAsUserInput: %w", err)
 	}
 	if q.markAIRunDeliveredStmt, err = db.PrepareContext(ctx, markAIRunDelivered); err != nil {
 		return nil, fmt.Errorf("error preparing query MarkAIRunDelivered: %w", err)
@@ -93,6 +111,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.markAIRunGeneratedStmt, err = db.PrepareContext(ctx, markAIRunGenerated); err != nil {
 		return nil, fmt.Errorf("error preparing query MarkAIRunGenerated: %w", err)
 	}
+	if q.setAIChatModelSettingStmt, err = db.PrepareContext(ctx, setAIChatModelSetting); err != nil {
+		return nil, fmt.Errorf("error preparing query SetAIChatModelSetting: %w", err)
+	}
 	if q.setAISessionModelStmt, err = db.PrepareContext(ctx, setAISessionModel); err != nil {
 		return nil, fmt.Errorf("error preparing query SetAISessionModel: %w", err)
 	}
@@ -101,6 +122,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.toggleAIChatSettingsUsageStmt, err = db.PrepareContext(ctx, toggleAIChatSettingsUsage); err != nil {
 		return nil, fmt.Errorf("error preparing query ToggleAIChatSettingsUsage: %w", err)
+	}
+	if q.touchAISessionStmt, err = db.PrepareContext(ctx, touchAISession); err != nil {
+		return nil, fmt.Errorf("error preparing query TouchAISession: %w", err)
 	}
 	if q.upsertAIChatSettingsStmt, err = db.PrepareContext(ctx, upsertAIChatSettings); err != nil {
 		return nil, fmt.Errorf("error preparing query UpsertAIChatSettings: %w", err)
@@ -124,6 +148,11 @@ func (q *Queries) Close() error {
 	if q.addAISessionMessageStmt != nil {
 		if cerr := q.addAISessionMessageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing addAISessionMessageStmt: %w", cerr)
+		}
+	}
+	if q.clearAISessionHistoryRebuildLossyStmt != nil {
+		if cerr := q.clearAISessionHistoryRebuildLossyStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing clearAISessionHistoryRebuildLossyStmt: %w", cerr)
 		}
 	}
 	if q.createAIRunStmt != nil {
@@ -156,6 +185,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getAIMessageStmt: %w", cerr)
 		}
 	}
+	if q.getAIRunStmt != nil {
+		if cerr := q.getAIRunStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getAIRunStmt: %w", cerr)
+		}
+	}
 	if q.getAIRunByRequestStmt != nil {
 		if cerr := q.getAIRunByRequestStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getAIRunByRequestStmt: %w", cerr)
@@ -171,6 +205,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getAISessionStmt: %w", cerr)
 		}
 	}
+	if q.getAISessionIDByMessageStmt != nil {
+		if cerr := q.getAISessionIDByMessageStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getAISessionIDByMessageStmt: %w", cerr)
+		}
+	}
 	if q.getAISessionProviderStateStmt != nil {
 		if cerr := q.getAISessionProviderStateStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getAISessionProviderStateStmt: %w", cerr)
@@ -184,6 +223,11 @@ func (q *Queries) Close() error {
 	if q.getMediaObjectStmt != nil {
 		if cerr := q.getMediaObjectStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getMediaObjectStmt: %w", cerr)
+		}
+	}
+	if q.getNextAISessionMessagePositionStmt != nil {
+		if cerr := q.getNextAISessionMessagePositionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getNextAISessionMessagePositionStmt: %w", cerr)
 		}
 	}
 	if q.incrementAISessionUsageStmt != nil {
@@ -206,6 +250,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listAIMessageMediaStmt: %w", cerr)
 		}
 	}
+	if q.listAISessionAssistantRunsStmt != nil {
+		if cerr := q.listAISessionAssistantRunsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAISessionAssistantRunsStmt: %w", cerr)
+		}
+	}
 	if q.listAISessionMessagesStmt != nil {
 		if cerr := q.listAISessionMessagesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listAISessionMessagesStmt: %w", cerr)
@@ -214,6 +263,11 @@ func (q *Queries) Close() error {
 	if q.listReferencedMediaHashesStmt != nil {
 		if cerr := q.listReferencedMediaHashesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listReferencedMediaHashesStmt: %w", cerr)
+		}
+	}
+	if q.markAIMessageAsUserInputStmt != nil {
+		if cerr := q.markAIMessageAsUserInputStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing markAIMessageAsUserInputStmt: %w", cerr)
 		}
 	}
 	if q.markAIRunDeliveredStmt != nil {
@@ -231,6 +285,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing markAIRunGeneratedStmt: %w", cerr)
 		}
 	}
+	if q.setAIChatModelSettingStmt != nil {
+		if cerr := q.setAIChatModelSettingStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing setAIChatModelSettingStmt: %w", cerr)
+		}
+	}
 	if q.setAISessionModelStmt != nil {
 		if cerr := q.setAISessionModelStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing setAISessionModelStmt: %w", cerr)
@@ -244,6 +303,11 @@ func (q *Queries) Close() error {
 	if q.toggleAIChatSettingsUsageStmt != nil {
 		if cerr := q.toggleAIChatSettingsUsageStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing toggleAIChatSettingsUsageStmt: %w", cerr)
+		}
+	}
+	if q.touchAISessionStmt != nil {
+		if cerr := q.touchAISessionStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing touchAISessionStmt: %w", cerr)
 		}
 	}
 	if q.upsertAIChatSettingsStmt != nil {
@@ -298,71 +362,87 @@ func (q *Queries) queryRow(ctx context.Context, stmt *sql.Stmt, query string, ar
 }
 
 type Queries struct {
-	db                               DBTX
-	tx                               *sql.Tx
-	addAIMessageMediaStmt            *sql.Stmt
-	addAISessionMessageStmt          *sql.Stmt
-	createAIRunStmt                  *sql.Stmt
-	createAISessionStmt              *sql.Stmt
-	deleteAISessionProviderStateStmt *sql.Stmt
-	deleteAISystemPromptStmt         *sql.Stmt
-	getAIChatSettingsStmt            *sql.Stmt
-	getAIMessageStmt                 *sql.Stmt
-	getAIRunByRequestStmt            *sql.Stmt
-	getAIRunByResponseStmt           *sql.Stmt
-	getAISessionStmt                 *sql.Stmt
-	getAISessionProviderStateStmt    *sql.Stmt
-	getAISystemPromptStmt            *sql.Stmt
-	getMediaObjectStmt               *sql.Stmt
-	incrementAISessionUsageStmt      *sql.Stmt
-	insertAIMessageStmt              *sql.Stmt
-	insertMediaObjectStmt            *sql.Stmt
-	listAIMessageMediaStmt           *sql.Stmt
-	listAISessionMessagesStmt        *sql.Stmt
-	listReferencedMediaHashesStmt    *sql.Stmt
-	markAIRunDeliveredStmt           *sql.Stmt
-	markAIRunFailedStmt              *sql.Stmt
-	markAIRunGeneratedStmt           *sql.Stmt
-	setAISessionModelStmt            *sql.Stmt
-	setAISessionStatusStmt           *sql.Stmt
-	toggleAIChatSettingsUsageStmt    *sql.Stmt
-	upsertAIChatSettingsStmt         *sql.Stmt
-	upsertAISessionProviderStateStmt *sql.Stmt
-	upsertAISystemPromptStmt         *sql.Stmt
+	db                                    DBTX
+	tx                                    *sql.Tx
+	addAIMessageMediaStmt                 *sql.Stmt
+	addAISessionMessageStmt               *sql.Stmt
+	clearAISessionHistoryRebuildLossyStmt *sql.Stmt
+	createAIRunStmt                       *sql.Stmt
+	createAISessionStmt                   *sql.Stmt
+	deleteAISessionProviderStateStmt      *sql.Stmt
+	deleteAISystemPromptStmt              *sql.Stmt
+	getAIChatSettingsStmt                 *sql.Stmt
+	getAIMessageStmt                      *sql.Stmt
+	getAIRunStmt                          *sql.Stmt
+	getAIRunByRequestStmt                 *sql.Stmt
+	getAIRunByResponseStmt                *sql.Stmt
+	getAISessionStmt                      *sql.Stmt
+	getAISessionIDByMessageStmt           *sql.Stmt
+	getAISessionProviderStateStmt         *sql.Stmt
+	getAISystemPromptStmt                 *sql.Stmt
+	getMediaObjectStmt                    *sql.Stmt
+	getNextAISessionMessagePositionStmt   *sql.Stmt
+	incrementAISessionUsageStmt           *sql.Stmt
+	insertAIMessageStmt                   *sql.Stmt
+	insertMediaObjectStmt                 *sql.Stmt
+	listAIMessageMediaStmt                *sql.Stmt
+	listAISessionAssistantRunsStmt        *sql.Stmt
+	listAISessionMessagesStmt             *sql.Stmt
+	listReferencedMediaHashesStmt         *sql.Stmt
+	markAIMessageAsUserInputStmt          *sql.Stmt
+	markAIRunDeliveredStmt                *sql.Stmt
+	markAIRunFailedStmt                   *sql.Stmt
+	markAIRunGeneratedStmt                *sql.Stmt
+	setAIChatModelSettingStmt             *sql.Stmt
+	setAISessionModelStmt                 *sql.Stmt
+	setAISessionStatusStmt                *sql.Stmt
+	toggleAIChatSettingsUsageStmt         *sql.Stmt
+	touchAISessionStmt                    *sql.Stmt
+	upsertAIChatSettingsStmt              *sql.Stmt
+	upsertAISessionProviderStateStmt      *sql.Stmt
+	upsertAISystemPromptStmt              *sql.Stmt
 }
 
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 	return &Queries{
-		db:                               tx,
-		tx:                               tx,
-		addAIMessageMediaStmt:            q.addAIMessageMediaStmt,
-		addAISessionMessageStmt:          q.addAISessionMessageStmt,
-		createAIRunStmt:                  q.createAIRunStmt,
-		createAISessionStmt:              q.createAISessionStmt,
-		deleteAISessionProviderStateStmt: q.deleteAISessionProviderStateStmt,
-		deleteAISystemPromptStmt:         q.deleteAISystemPromptStmt,
-		getAIChatSettingsStmt:            q.getAIChatSettingsStmt,
-		getAIMessageStmt:                 q.getAIMessageStmt,
-		getAIRunByRequestStmt:            q.getAIRunByRequestStmt,
-		getAIRunByResponseStmt:           q.getAIRunByResponseStmt,
-		getAISessionStmt:                 q.getAISessionStmt,
-		getAISessionProviderStateStmt:    q.getAISessionProviderStateStmt,
-		getAISystemPromptStmt:            q.getAISystemPromptStmt,
-		getMediaObjectStmt:               q.getMediaObjectStmt,
-		incrementAISessionUsageStmt:      q.incrementAISessionUsageStmt,
-		insertAIMessageStmt:              q.insertAIMessageStmt,
-		insertMediaObjectStmt:            q.insertMediaObjectStmt,
-		listAIMessageMediaStmt:           q.listAIMessageMediaStmt,
-		listAISessionMessagesStmt:        q.listAISessionMessagesStmt,
-		listReferencedMediaHashesStmt:    q.listReferencedMediaHashesStmt,
-		markAIRunDeliveredStmt:           q.markAIRunDeliveredStmt,
-		markAIRunFailedStmt:              q.markAIRunFailedStmt,
-		markAIRunGeneratedStmt:           q.markAIRunGeneratedStmt,
-		setAISessionModelStmt:            q.setAISessionModelStmt,
-		setAISessionStatusStmt:           q.setAISessionStatusStmt,
-		toggleAIChatSettingsUsageStmt:    q.toggleAIChatSettingsUsageStmt,
-		upsertAIChatSettingsStmt:         q.upsertAIChatSettingsStmt,
-		upsertAISessionProviderStateStmt: q.upsertAISessionProviderStateStmt,
-		upsertAISystemPromptStmt:         q.upsertAISystemPromptStmt,
+		db:                                    tx,
+		tx:                                    tx,
+		addAIMessageMediaStmt:                 q.addAIMessageMediaStmt,
+		addAISessionMessageStmt:               q.addAISessionMessageStmt,
+		clearAISessionHistoryRebuildLossyStmt: q.clearAISessionHistoryRebuildLossyStmt,
+		createAIRunStmt:                       q.createAIRunStmt,
+		createAISessionStmt:                   q.createAISessionStmt,
+		deleteAISessionProviderStateStmt:      q.deleteAISessionProviderStateStmt,
+		deleteAISystemPromptStmt:              q.deleteAISystemPromptStmt,
+		getAIChatSettingsStmt:                 q.getAIChatSettingsStmt,
+		getAIMessageStmt:                      q.getAIMessageStmt,
+		getAIRunStmt:                          q.getAIRunStmt,
+		getAIRunByRequestStmt:                 q.getAIRunByRequestStmt,
+		getAIRunByResponseStmt:                q.getAIRunByResponseStmt,
+		getAISessionStmt:                      q.getAISessionStmt,
+		getAISessionIDByMessageStmt:           q.getAISessionIDByMessageStmt,
+		getAISessionProviderStateStmt:         q.getAISessionProviderStateStmt,
+		getAISystemPromptStmt:                 q.getAISystemPromptStmt,
+		getMediaObjectStmt:                    q.getMediaObjectStmt,
+		getNextAISessionMessagePositionStmt:   q.getNextAISessionMessagePositionStmt,
+		incrementAISessionUsageStmt:           q.incrementAISessionUsageStmt,
+		insertAIMessageStmt:                   q.insertAIMessageStmt,
+		insertMediaObjectStmt:                 q.insertMediaObjectStmt,
+		listAIMessageMediaStmt:                q.listAIMessageMediaStmt,
+		listAISessionAssistantRunsStmt:        q.listAISessionAssistantRunsStmt,
+		listAISessionMessagesStmt:             q.listAISessionMessagesStmt,
+		listReferencedMediaHashesStmt:         q.listReferencedMediaHashesStmt,
+		markAIMessageAsUserInputStmt:          q.markAIMessageAsUserInputStmt,
+		markAIRunDeliveredStmt:                q.markAIRunDeliveredStmt,
+		markAIRunFailedStmt:                   q.markAIRunFailedStmt,
+		markAIRunGeneratedStmt:                q.markAIRunGeneratedStmt,
+		setAIChatModelSettingStmt:             q.setAIChatModelSettingStmt,
+		setAISessionModelStmt:                 q.setAISessionModelStmt,
+		setAISessionStatusStmt:                q.setAISessionStatusStmt,
+		toggleAIChatSettingsUsageStmt:         q.toggleAIChatSettingsUsageStmt,
+		touchAISessionStmt:                    q.touchAISessionStmt,
+		upsertAIChatSettingsStmt:              q.upsertAIChatSettingsStmt,
+		upsertAISessionProviderStateStmt:      q.upsertAISessionProviderStateStmt,
+		upsertAISystemPromptStmt:              q.upsertAISystemPromptStmt,
 	}
 }

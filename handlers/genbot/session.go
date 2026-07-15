@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	g "main/globalcfg"
+	"main/globalcfg/aiq"
 	"main/globalcfg/h"
 	"main/globalcfg/q"
 	genai "main/handlers/genbot/geminiapi"
@@ -22,37 +23,21 @@ import (
 
 type GeminiSession struct {
 	q.GeminiSession
-	mu                      sync.Mutex
-	Contents                []q.GeminiContent
-	TmpContents             []q.GeminiContent
-	TmpContextOnlyMsgIDs    map[int64]struct{}
-	UpdateTime              time.Time
-	AssistantPayloads       map[int64]g.AIAssistantPayload
-	PendingResponses        map[int64]pendingAssistantResponse
-	GeminiInteractionID     string
-	WindowStartMsgID        int64
-	PendingInteractionID    string
-	PendingWindowStartMsgID int64
-	PendingWindowDrop       int
-	PendingRuntimeState     bool
-	HistoryRebuildLossy     bool
-	GeminiCache             geminiExplicitCacheState
+	mu                   sync.Mutex
+	Contents             []q.GeminiContent
+	TmpContents          []q.GeminiContent
+	TmpContextOnlyMsgIDs map[int64]struct{}
+	TmpPersisted         bool
+	UpdateTime           time.Time
+	AssistantPayloads    map[int64]g.AIAssistantPayload
+	GeminiInteractionID  string
+	WindowStartMsgID     int64
+	HistoryRebuildLossy  bool
+	GeminiCache          geminiExplicitCacheState
 
 	AllowCodeExecution bool
 	Provider           string
 	Model              string
-}
-
-type pendingAssistantResponse struct {
-	ChatID        int64
-	Provider      string
-	Model         string
-	Usage         AIUsage
-	Payload       []byte
-	PayloadFormat string
-	MessageCount  int64
-	FirstMsgID    int64
-	LastMsgID     int64
 }
 
 type aiRequestWindow struct {
@@ -386,12 +371,12 @@ func (s *GeminiSession) AddTgMessageWithReplyMode(ctx context.Context, bot *gotg
 	}
 	if replied := msg.ReplyToMessage; replied != nil && !s.containsMessage(replied.MessageId) {
 		// A stored message may have fallen out of the active sliding window. It is
-		// request context only because gemini_contents has a global
-		// (chat_id, msg_id) uniqueness constraint. @new also forces an otherwise
-		// unstored reply to remain ephemeral so its session ownership is unchanged.
+		// The Telegram message body is global while session membership is
+		// many-to-many. @new marks the replied message as request-only context so
+		// it does not become stable history in the new branch.
 		contextOnly := replyContextOnly
 		if !contextOnly {
-			_, lookupErr := g.Q.GetSessionIdByMessage(ctx, msg.Chat.Id, replied.MessageId)
+			_, lookupErr := g.AIQ.GetAISessionIDByMessage(ctx, msg.Chat.Id, replied.MessageId)
 			contextOnly = lookupErr == nil
 			if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
 				return lookupErr
@@ -442,46 +427,28 @@ func (s *GeminiSession) AddTgMessageWithReplyMode(ctx context.Context, bot *gotg
 	return s.AddTgMessage(bot, msg)
 }
 
-func (s *GeminiSession) AddModelMessage(msg *gotgbot.Message, result *AIResult) {
-	content := q.GeminiContent{
-		SessionID: s.ID,
-		ChatID:    msg.Chat.Id,
-		MsgID:     msg.MessageId,
-		Role:      genai.RoleModel,
-		SentTime:  q.UnixTime{Time: time.Unix(msg.Date, 0)},
-		Username:  mainBot.FirstName,
-		MsgType:   "text",
-		Text:      sql.NullString{String: result.DisplayText, Valid: result.DisplayText != ""},
-		UserID:    mainBot.Id,
-	}
-	if mainBot.Username != "" {
-		content.AtableUsername = sql.NullString{String: mainBot.Username, Valid: true}
-	}
-	if result.ThoughtSignature != "" {
-		content.ThoughtSignature = sql.NullString{String: result.ThoughtSignature, Valid: true}
-	}
-	s.TmpContents = append(s.TmpContents, content)
-	if s.PendingResponses == nil {
-		s.PendingResponses = make(map[int64]pendingAssistantResponse)
-	}
-	s.PendingResponses[msg.MessageId] = pendingAssistantResponse{
-		ChatID: msg.Chat.Id, Provider: s.Provider, Model: s.Model, Usage: result.Usage,
-		Payload: result.AssistantPayload, PayloadFormat: result.AssistantPayloadFormat,
-		MessageCount: result.InputMessageCount, FirstMsgID: result.InputFirstMsgID,
-		LastMsgID: result.InputLastMsgID,
-	}
-	s.PendingInteractionID = result.InteractionID
-	s.PendingWindowStartMsgID = result.WindowStartMsgID
-	s.PendingWindowDrop = result.WindowDrop
-	s.PendingRuntimeState = true
-}
-
 func (s *GeminiSession) loadContentFromDatabase(ctx context.Context) error {
-	content, err := g.Q.GetAllMsgInSession(ctx, s.ID, geminiSessionContentLimit)
+	rows, err := g.AIQ.ListAISessionMessages(ctx, s.ID)
 	if err != nil {
 		return err
 	}
-	s.Contents = content
+	start := 0
+	if len(rows) > geminiSessionContentLimit {
+		start = len(rows) - geminiSessionContentLimit
+	}
+	s.Contents = make([]q.GeminiContent, 0, len(rows)-start)
+	for _, row := range rows[start:] {
+		content := q.GeminiContent{
+			SessionID: row.SessionID, ChatID: row.ChatID, MsgID: row.MsgID, Role: row.Role,
+			SentTime: q.UnixTime{Time: time.Unix(row.SentAt, 0)}, Username: row.Username,
+			MsgType: row.MsgType, ReplyToMsgID: row.ReplyToMsgID, Text: row.Text,
+			QuotePart: row.QuotePart, AtableUsername: row.AtableUsername, UserID: row.UserID,
+		}
+		if err = loadAIContentMedia(ctx, &content); err != nil {
+			return err
+		}
+		s.Contents = append(s.Contents, content)
+	}
 	s.AssistantPayloads, err = g.GetAISessionAssistantPayloads(ctx, s.ID)
 	if err != nil {
 		return err
@@ -499,13 +466,8 @@ func (s *GeminiSession) refreshCapabilities() {
 	}
 }
 
-func (s *GeminiSession) loadModel(ctx context.Context, fallback string) error {
+func (s *GeminiSession) loadModel(ctx context.Context) error {
 	provider, model, err := g.GetAISessionModel(ctx, s.ID)
-	if errors.Is(err, sql.ErrNoRows) {
-		model = fallback
-		provider = providerForModel(model)
-		err = g.SetAISessionModel(ctx, s.ID, provider, model)
-	}
 	if err != nil {
 		return err
 	}
@@ -544,100 +506,27 @@ func (s *GeminiSession) loadModel(ctx context.Context, fallback string) error {
 	return nil
 }
 
-func (s *GeminiSession) PersistTmpUpdates(ctx context.Context) error {
-	if len(s.TmpContents) == 0 {
-		return nil
-	}
-	tx, err := g.RawMainDb().BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
-	newQ := g.Q.WithTx(tx)
-	for i := range s.TmpContents {
-		if _, contextOnly := s.TmpContextOnlyMsgIDs[s.TmpContents[i].MsgID]; contextOnly {
-			continue
-		}
-		err = s.TmpContents[i].Save(ctx, newQ)
-		if err != nil {
-			return err
-		}
-	}
-	for msgID, response := range s.PendingResponses {
-		err = g.UpsertAIMessageResponse(ctx, tx, s.ID, msgID, response.ChatID, g.AIMessageUsage{
-			Provider: response.Provider, Model: response.Model,
-			InputTokens: response.Usage.InputTokens, OutputTokens: response.Usage.OutputTokens,
-			CachedInputTokens: response.Usage.CachedInputTokens,
-			InputMessageCount: response.MessageCount, InputFirstMsgID: response.FirstMsgID,
-			InputLastMsgID: response.LastMsgID,
-		}, response.PayloadFormat, response.Payload)
-		if err != nil {
-			return err
-		}
-	}
-	if s.PendingRuntimeState {
-		cacheExpire := int64(0)
-		if !s.GeminiCache.ExpireTime.IsZero() {
-			cacheExpire = s.GeminiCache.ExpireTime.Unix()
-		}
-		err = g.SetAISessionRuntimeStateFull(ctx, tx, s.ID, g.AISessionRuntimeState{
-			GeminiInteractionID: s.PendingInteractionID, WindowStartMsgID: s.PendingWindowStartMsgID,
-			GeminiCacheName: s.GeminiCache.Name, GeminiCacheExpireTime: cacheExpire,
-			GeminiCacheStartMsgID: s.GeminiCache.StartMsgID, GeminiCacheEndMsgID: s.GeminiCache.EndMsgID,
-			GeminiCacheTokenCount:  s.GeminiCache.TokenCount,
-			GeminiCacheFingerprint: s.GeminiCache.Fingerprint,
-		})
-		if err != nil {
-			return err
-		}
-	}
-	if err = tx.Commit(); err != nil {
-		return err
-	}
-	s.Contents = append(s.Contents, s.TmpContents...)
-	if s.PendingWindowDrop > 0 {
-		if s.PendingWindowDrop >= len(s.Contents) {
-			s.Contents = nil
-		} else {
-			s.Contents = s.Contents[s.PendingWindowDrop:]
-		}
-	}
-	if s.AssistantPayloads == nil {
-		s.AssistantPayloads = make(map[int64]g.AIAssistantPayload)
-	}
-	for msgID, response := range s.PendingResponses {
-		s.AssistantPayloads[msgID] = g.AIAssistantPayload{
-			MsgID: msgID, Provider: response.Provider, Format: response.PayloadFormat,
-			Payload: append([]byte(nil), response.Payload...),
-		}
-	}
-	s.TmpContents = nil
-	s.TmpContextOnlyMsgIDs = nil
-	s.PendingResponses = nil
-	s.GeminiInteractionID = s.PendingInteractionID
-	s.WindowStartMsgID = s.PendingWindowStartMsgID
-	s.PendingInteractionID = ""
-	s.PendingWindowStartMsgID = 0
-	s.PendingWindowDrop = 0
-	s.PendingRuntimeState = false
-	s.HistoryRebuildLossy = false
-	s.UpdateTime = time.Now()
-	s.refreshCapabilities()
-	return nil
-}
-
 func (s *GeminiSession) DiscardTmpUpdates() {
+	if s.TmpPersisted {
+		for _, item := range s.TmpContents {
+			if _, contextOnly := s.TmpContextOnlyMsgIDs[item.MsgID]; contextOnly {
+				continue
+			}
+			found := false
+			for i := range s.Contents {
+				if s.Contents[i].ChatID == item.ChatID && s.Contents[i].MsgID == item.MsgID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				s.Contents = append(s.Contents, item)
+			}
+		}
+	}
 	s.TmpContents = nil
 	s.TmpContextOnlyMsgIDs = nil
-	s.PendingResponses = nil
-	s.PendingInteractionID = ""
-	s.PendingWindowStartMsgID = 0
-	s.PendingWindowDrop = 0
-	s.PendingRuntimeState = false
+	s.TmpPersisted = false
 }
 
 func GeminiGetSession(ctx context.Context, msg *gotgbot.Message, createNewSession bool, ignoreSessionTimeout bool, mentionSessionId int64) *GeminiSession {
@@ -649,7 +538,7 @@ func GeminiGetSession(ctx context.Context, msg *gotgbot.Message, createNewSessio
 		var sessionId int64
 		var err error
 		if mentionSessionId == 0 {
-			sessionId, err = g.Q.GetSessionIdByMessage(ctx, msg.Chat.Id, msg.ReplyToMessage.MessageId)
+			sessionId, err = g.AIQ.GetAISessionIDByMessage(ctx, msg.Chat.Id, msg.ReplyToMessage.MessageId)
 		} else {
 			sessionId = mentionSessionId
 		}
@@ -659,18 +548,21 @@ func GeminiGetSession(ctx context.Context, msg *gotgbot.Message, createNewSessio
 			}
 		}
 
-		session.GeminiSession, err = g.Q.GetSessionById(ctx, sessionId)
+		storedSession, lookupErr := g.AIQ.GetAISession(ctx, sessionId)
+		err = lookupErr
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				goto create
 			}
 			return nil
 		}
+		session.GeminiSession = sessionFromV2(storedSession)
+		session.UpdateTime = time.Unix(storedSession.UpdatedAt, 0)
 		err = session.loadContentFromDatabase(ctx)
 		if err != nil {
 			return nil
 		}
-		if err = session.loadModel(ctx, defaultAIModel); err != nil {
+		if err = session.loadModel(ctx); err != nil {
 			return nil
 		}
 		geminiSessions.sidToSess[sessionId] = session
@@ -686,20 +578,27 @@ create:
 		delete(geminiSessions.sidToSess, sess.ID)
 	}
 	delete(geminiSessions.chatIdToSess, topic)
-	var err error
-	session.GeminiSession, err = g.Q.CreateNewGeminiSession(ctx, msg.Chat.Id, getChatName(msg.Chat), msg.Chat.Type)
+	provider, model, err := g.GetAIChatSelection(ctx, topic.chatId,
+		providerForModel(defaultAIModel), defaultAIModel)
 	if err != nil {
 		return nil
 	}
+	now := time.Now().Unix()
+	storedSession, err := g.AIQ.CreateAISession(ctx, aiq.CreateAISessionParams{
+		ChatID: msg.Chat.Id, TopicID: sql.NullInt64{Int64: topic.topicId, Valid: topic.topicId != 0},
+		ChatName: getChatName(msg.Chat), ChatType: msg.Chat.Type, Provider: provider, Model: model,
+		CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		return nil
+	}
+	session.GeminiSession = sessionFromV2(storedSession)
+	session.UpdateTime = time.Unix(storedSession.UpdatedAt, 0)
 	err = session.loadContentFromDatabase(ctx)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
-	model, err := g.GetAIChatModel(ctx, topic.chatId, defaultAIModel)
-	if err != nil {
-		return nil
-	}
-	if err = session.loadModel(ctx, model); err != nil {
+	if err = session.loadModel(ctx); err != nil {
 		return nil
 	}
 	geminiSessions.sidToSess[session.ID] = session

@@ -92,7 +92,7 @@ func ChangeGeminiModel(bot *gotgbot.Bot, ctx *ext.Context) error {
 	}
 	prompt := "请选择当前聊天使用的 AI 模型："
 	if msg.ReplyToMessage != nil {
-		sessionID, err = g.Q.GetSessionIdByMessage(requestCtx, msg.Chat.Id, msg.ReplyToMessage.MessageId)
+		sessionID, err = g.AIQ.GetAISessionIDByMessage(requestCtx, msg.Chat.Id, msg.ReplyToMessage.MessageId)
 		if errors.Is(err, sql.ErrNoRows) {
 			_, replyErr := msg.Reply(bot, "被回复的消息不属于可切换的 AI 会话。", nil)
 			return replyErr
@@ -151,7 +151,7 @@ func ChangeModelByButton(bot *gotgbot.Bot, ctx *ext.Context) error {
 	}
 	requestCtx := context.Background()
 	if sessionID != 0 {
-		target, targetErr := g.Q.GetSessionById(requestCtx, sessionID)
+		target, targetErr := g.AIQ.GetAISession(requestCtx, sessionID)
 		if targetErr != nil || target.ChatID != msg.Chat.Id {
 			_, _ = ctx.CallbackQuery.Answer(bot, &gotgbot.AnswerCallbackQueryOpts{
 				Text: "目标历史会话不存在或不属于当前聊天", ShowAlert: true,
@@ -179,7 +179,7 @@ func ChangeModelByButton(bot *gotgbot.Bot, ctx *ext.Context) error {
 		_, _ = ctx.CallbackQuery.Answer(bot, &gotgbot.AnswerCallbackQueryOpts{Text: "已切换到 " + option.Label})
 		return editErr
 	}
-	if err = g.SetAIChatModel(requestCtx, msg.Chat.Id, model); err != nil {
+	if err = g.SetAIChatModel(requestCtx, msg.Chat.Id, option.Provider, model); err != nil {
 		return err
 	}
 	invalidateChatSessions(msg.Chat.Id)
@@ -202,7 +202,8 @@ func ToggleShowUsage(bot *gotgbot.Bot, ctx *ext.Context) error {
 		_, err = msg.Reply(bot, "只有群主或管理员可以修改用量显示设置", nil)
 		return err
 	}
-	enabled, err := g.ToggleAIChatUsage(context.Background(), msg.Chat.Id, defaultAIModel)
+	enabled, err := g.ToggleAIChatUsage(context.Background(), msg.Chat.Id,
+		providerForModel(defaultAIModel), defaultAIModel)
 	if err != nil {
 		return err
 	}

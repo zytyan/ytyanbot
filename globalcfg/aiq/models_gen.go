@@ -53,6 +53,7 @@ type AiRun struct {
 	InputFirstMsgID        sql.NullInt64  `json:"input_first_msg_id"`
 	InputLastMsgID         sql.NullInt64  `json:"input_last_msg_id"`
 	ResponseText           sql.NullString `json:"response_text"`
+	RawPayload             []byte         `json:"raw_payload"`
 	ThoughtSignature       sql.NullString `json:"thought_signature"`
 	AssistantPayload       []byte         `json:"assistant_payload"`
 	AssistantPayloadFormat sql.NullString `json:"assistant_payload_format"`

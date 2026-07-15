@@ -11,10 +11,21 @@ RETURNING *;
 -- name: GetAIChatSettings :one
 SELECT * FROM ai_chat_settings WHERE chat_id = ?;
 
+-- name: SetAIChatModelSetting :one
+INSERT INTO ai_chat_settings(chat_id, default_provider, default_model, show_usage, updated_at)
+VALUES (sqlc.arg(chat_id), sqlc.arg(default_provider), sqlc.arg(default_model), 0, sqlc.arg(updated_at))
+ON CONFLICT(chat_id) DO UPDATE SET
+    default_provider=excluded.default_provider,
+    default_model=excluded.default_model,
+    updated_at=excluded.updated_at
+RETURNING *;
+
 -- name: ToggleAIChatSettingsUsage :one
-UPDATE ai_chat_settings
-SET show_usage = NOT show_usage, updated_at = sqlc.arg(updated_at)
-WHERE chat_id = sqlc.arg(chat_id)
+INSERT INTO ai_chat_settings(chat_id, default_provider, default_model, show_usage, updated_at)
+VALUES (sqlc.arg(chat_id), sqlc.arg(default_provider), sqlc.arg(default_model), 1, sqlc.arg(updated_at))
+ON CONFLICT(chat_id) DO UPDATE SET
+    show_usage=NOT ai_chat_settings.show_usage,
+    updated_at=excluded.updated_at
 RETURNING *;
 
 -- name: CreateAISession :one
@@ -26,6 +37,15 @@ RETURNING *;
 -- name: GetAISession :one
 SELECT * FROM ai_sessions WHERE id = ?;
 
+-- name: GetAISessionIDByMessage :one
+SELECT sm.session_id
+FROM ai_session_messages AS sm
+JOIN ai_sessions AS s ON s.id = sm.session_id
+WHERE sm.chat_id = sqlc.arg(chat_id) AND sm.msg_id = sqlc.arg(msg_id)
+  AND sm.context_only=0
+ORDER BY s.updated_at DESC, sm.session_id DESC
+LIMIT 1;
+
 -- name: SetAISessionModel :exec
 UPDATE ai_sessions
 SET provider=sqlc.arg(provider), model=sqlc.arg(model), history_rebuild_lossy=1,
@@ -35,6 +55,14 @@ WHERE id=sqlc.arg(session_id);
 -- name: SetAISessionStatus :exec
 UPDATE ai_sessions
 SET status=sqlc.arg(status), updated_at=sqlc.arg(updated_at)
+WHERE id=sqlc.arg(session_id);
+
+-- name: TouchAISession :exec
+UPDATE ai_sessions SET updated_at=sqlc.arg(updated_at) WHERE id=sqlc.arg(session_id);
+
+-- name: ClearAISessionHistoryRebuildLossy :exec
+UPDATE ai_sessions
+SET history_rebuild_lossy=0, updated_at=sqlc.arg(updated_at)
 WHERE id=sqlc.arg(session_id);
 
 -- name: IncrementAISessionUsage :exec
@@ -69,7 +97,8 @@ SELECT DISTINCT media_sha256 FROM ai_message_media ORDER BY media_sha256;
 
 -- name: AddAIMessageMedia :exec
 INSERT INTO ai_message_media(chat_id, msg_id, ordinal, media_sha256, media_kind)
-VALUES (?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(chat_id, msg_id, ordinal) DO NOTHING;
 
 -- name: ListAIMessageMedia :many
 SELECT m.*
@@ -84,11 +113,26 @@ VALUES (sqlc.arg(session_id), sqlc.arg(position), sqlc.arg(chat_id), sqlc.arg(ms
         sqlc.arg(role), sqlc.narg(quote_part), sqlc.arg(context_only))
 ON CONFLICT(session_id, chat_id, msg_id) DO NOTHING;
 
+-- name: GetNextAISessionMessagePosition :one
+SELECT CAST(COALESCE(MAX(position) + 1, 0) AS INTEGER)
+FROM ai_session_messages
+WHERE session_id = ?;
+
+-- name: MarkAIMessageAsUserInput :exec
+UPDATE ai_session_messages
+SET role = 'user'
+WHERE chat_id = sqlc.arg(chat_id) AND msg_id = sqlc.arg(msg_id)
+  AND NOT EXISTS (
+      SELECT 1 FROM ai_runs
+      WHERE response_chat_id = sqlc.arg(chat_id) AND response_msg_id = sqlc.arg(msg_id)
+  );
+
 -- name: ListAISessionMessages :many
 SELECT sm.*, m.sent_at, m.user_id, m.username, m.atable_username, m.msg_type, m.text, m.reply_to_msg_id
 FROM ai_session_messages sm
 JOIN ai_messages m ON m.chat_id=sm.chat_id AND m.msg_id=sm.msg_id
 WHERE sm.session_id=?
+  AND sm.context_only=0
 ORDER BY sm.position;
 
 -- name: CreateAIRun :one
@@ -102,8 +146,19 @@ RETURNING *;
 SELECT * FROM ai_runs
 WHERE session_id=? AND request_chat_id=? AND request_msg_id=?;
 
+-- name: GetAIRun :one
+SELECT * FROM ai_runs WHERE id=?;
+
 -- name: GetAIRunByResponse :one
 SELECT * FROM ai_runs WHERE response_chat_id=? AND response_msg_id=?;
+
+-- name: ListAISessionAssistantRuns :many
+SELECT * FROM ai_runs
+WHERE session_id=? AND status='delivered'
+  AND response_msg_id IS NOT NULL
+  AND assistant_payload IS NOT NULL
+  AND assistant_payload_format IS NOT NULL
+ORDER BY requested_at, id;
 
 -- name: MarkAIRunGenerated :execrows
 UPDATE ai_runs
@@ -112,7 +167,8 @@ SET status='generated', completed_at=sqlc.arg(completed_at),
     cached_input_tokens=sqlc.narg(cached_input_tokens),
     input_message_count=sqlc.narg(input_message_count),
     input_first_msg_id=sqlc.narg(input_first_msg_id), input_last_msg_id=sqlc.narg(input_last_msg_id),
-    response_text=sqlc.narg(response_text), thought_signature=sqlc.narg(thought_signature),
+    response_text=sqlc.narg(response_text), raw_payload=sqlc.narg(raw_payload),
+    thought_signature=sqlc.narg(thought_signature),
     assistant_payload=sqlc.narg(assistant_payload), assistant_payload_format=sqlc.narg(assistant_payload_format),
     cache_expire_at=sqlc.narg(cache_expire_at), candidate_state_json=sqlc.narg(candidate_state_json),
     error_code=NULL, error_message=NULL
@@ -128,7 +184,7 @@ WHERE id=sqlc.arg(run_id) AND status IN ('generated', 'delivery_failed');
 UPDATE ai_runs
 SET status=sqlc.arg(status), completed_at=sqlc.arg(completed_at),
     error_code=sqlc.narg(error_code), error_message=sqlc.narg(error_message)
-WHERE id=sqlc.arg(run_id) AND status IN ('pending', 'generated');
+WHERE id=sqlc.arg(run_id) AND status IN ('pending', 'generated', 'delivery_failed');
 
 -- name: UpsertAISessionProviderState :exec
 INSERT INTO ai_session_provider_state(session_id, provider, state_version, state_json, updated_at)

@@ -110,7 +110,7 @@ func getSysPrompt(msg *gotgbot.Message) *Replacer {
 	if r, ok := sysPromptReplacerCache[topic]; ok {
 		return r
 	}
-	tmpl, err := g.Q.GetGeminiSystemPrompt(context.Background(), topic.chatId, topic.topicId)
+	tmpl, err := g.AIQ.GetAISystemPrompt(context.Background(), topic.chatId, topic.topicId)
 	if err == nil {
 		r := NewReplacer(tmpl)
 		sysPromptReplacerCache[topic] = &r
@@ -154,16 +154,43 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 	if err := session.AddTgMessageWithReplyMode(genCtx, bot, ctx.EffectiveMessage, createNewSession); err != nil {
 		return err
 	}
+	defer session.DiscardTmpUpdates()
+	run, err := session.GetOrBeginAIRun(genCtx, msg.Chat.Id, msg.MessageId)
+	if err != nil {
+		return err
+	}
+	if run.Status == "delivered" {
+		return nil
+	}
+	if run.Status == "model_failed" || run.Status == "persistence_failed" {
+		return fmt.Errorf("previous AI attempt failed (%s): %s", run.Status, run.ErrorMessage.String)
+	}
+	originalCache := session.GeminiCache
+	deliveryCommitted := false
+	defer func() {
+		if !deliveryCommitted {
+			session.GeminiCache = originalCache
+		}
+	}()
 	if session.AllowCodeExecution {
 		config.Tools[0].CodeExecution = &genai.ToolCodeExecution{}
 	}
-	defer session.DiscardTmpUpdates()
-
 	actionCancel := h.WithChatAction(bot, "typing", msg.Chat.Id, msg.MessageThreadId, msg.IsTopicMessage)
 	defer actionCancel()
-	res, err := generateAI(genCtx, session, sysPrompt, config)
+	var res *AIResult
+	failureStatus := "model_failed"
+	if run.Status == "generated" || run.Status == "delivery_failed" {
+		res = resultFromStoredRun(run)
+	} else {
+		res, err = generateAI(genCtx, session, sysPrompt, config)
+		if err == nil {
+			err = session.CompleteAIRun(genCtx, run.ID, res)
+			failureStatus = "persistence_failed"
+		}
+	}
 	actionCancel()
 	if err != nil {
+		_ = MarkAIRunFailed(genCtx, run.ID, failureStatus, normalizeAIRunErrorCode(err), err)
 		if errors.Is(err, ErrDeepSeekVideoOnly) {
 			setReaction(bot, msg, "🤔")
 			_, replyErr := ctx.EffectiveMessage.Reply(bot, err.Error(), nil)
@@ -173,13 +200,6 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 		_, _ = ctx.EffectiveMessage.Reply(bot, fmt.Sprintf("error:%s", err), nil)
 		return err
 	}
-	_ = g.Q.IncrementSessionTokenCounters(
-		genCtx,
-		res.Usage.InputTokens,
-		res.Usage.OutputTokens,
-		session.ID,
-	)
-	_ = g.IncrementAICachedTokens(genCtx, session.ID, res.Usage.CachedInputTokens)
 	if res.Usage.InputTokens > 0 {
 		log.Info("ai usage", "provider", session.Provider, "model", session.Model,
 			"input_tokens", res.Usage.InputTokens, "cached_input_tokens", res.Usage.CachedInputTokens,
@@ -213,12 +233,14 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 	}
 	if err != nil {
 		log.Warn("ai response", "resp", string(res.Raw), "err", err)
+		_ = MarkAIRunFailed(genCtx, run.ID, "delivery_failed", normalizeAIRunErrorCode(err), err)
 		return err
 	}
-	session.AddModelMessage(respMsg, res)
-	if err = session.PersistTmpUpdates(genCtx); err != nil {
+	if err = session.DeliverAIRun(genCtx, run.ID, respMsg, res); err != nil {
+		_ = MarkAIRunFailed(genCtx, run.ID, "delivery_failed", "delivery_persistence_failed", err)
 		return err
 	}
+	deliveryCommitted = true
 	return nil
 }
 

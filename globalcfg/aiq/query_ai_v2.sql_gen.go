@@ -13,6 +13,7 @@ import (
 const addAIMessageMedia = `-- name: AddAIMessageMedia :exec
 INSERT INTO ai_message_media(chat_id, msg_id, ordinal, media_sha256, media_kind)
 VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(chat_id, msg_id, ordinal) DO NOTHING
 `
 
 type AddAIMessageMediaParams struct {
@@ -64,12 +65,23 @@ func (q *Queries) AddAISessionMessage(ctx context.Context, arg AddAISessionMessa
 	return err
 }
 
+const clearAISessionHistoryRebuildLossy = `-- name: ClearAISessionHistoryRebuildLossy :exec
+UPDATE ai_sessions
+SET history_rebuild_lossy=0, updated_at=?1
+WHERE id=?2
+`
+
+func (q *Queries) ClearAISessionHistoryRebuildLossy(ctx context.Context, updatedAt int64, sessionID int64) error {
+	_, err := q.exec(ctx, q.clearAISessionHistoryRebuildLossyStmt, clearAISessionHistoryRebuildLossy, updatedAt, sessionID)
+	return err
+}
+
 const createAIRun = `-- name: CreateAIRun :one
 INSERT INTO ai_runs(session_id, request_chat_id, request_msg_id, status, provider, model, requested_at)
 VALUES (?1, ?2, ?3,
         'pending', ?4, ?5, ?6)
 ON CONFLICT(session_id, request_chat_id, request_msg_id) DO UPDATE SET id=id
-RETURNING id, session_id, request_chat_id, request_msg_id, status, provider, model, requested_at, completed_at, input_tokens, output_tokens, cached_input_tokens, input_message_count, input_first_msg_id, input_last_msg_id, response_text, thought_signature, assistant_payload, assistant_payload_format, cache_expire_at, candidate_state_json, response_chat_id, response_msg_id, error_code, error_message
+RETURNING id, session_id, request_chat_id, request_msg_id, status, provider, model, requested_at, completed_at, input_tokens, output_tokens, cached_input_tokens, input_message_count, input_first_msg_id, input_last_msg_id, response_text, raw_payload, thought_signature, assistant_payload, assistant_payload_format, cache_expire_at, candidate_state_json, response_chat_id, response_msg_id, error_code, error_message
 `
 
 type CreateAIRunParams struct {
@@ -108,6 +120,7 @@ func (q *Queries) CreateAIRun(ctx context.Context, arg CreateAIRunParams) (AiRun
 		&i.InputFirstMsgID,
 		&i.InputLastMsgID,
 		&i.ResponseText,
+		&i.RawPayload,
 		&i.ThoughtSignature,
 		&i.AssistantPayload,
 		&i.AssistantPayloadFormat,
@@ -226,8 +239,46 @@ func (q *Queries) GetAIMessage(ctx context.Context, chatID int64, msgID int64) (
 	return i, err
 }
 
+const getAIRun = `-- name: GetAIRun :one
+SELECT id, session_id, request_chat_id, request_msg_id, status, provider, model, requested_at, completed_at, input_tokens, output_tokens, cached_input_tokens, input_message_count, input_first_msg_id, input_last_msg_id, response_text, raw_payload, thought_signature, assistant_payload, assistant_payload_format, cache_expire_at, candidate_state_json, response_chat_id, response_msg_id, error_code, error_message FROM ai_runs WHERE id=?
+`
+
+func (q *Queries) GetAIRun(ctx context.Context, id int64) (AiRun, error) {
+	row := q.queryRow(ctx, q.getAIRunStmt, getAIRun, id)
+	var i AiRun
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.RequestChatID,
+		&i.RequestMsgID,
+		&i.Status,
+		&i.Provider,
+		&i.Model,
+		&i.RequestedAt,
+		&i.CompletedAt,
+		&i.InputTokens,
+		&i.OutputTokens,
+		&i.CachedInputTokens,
+		&i.InputMessageCount,
+		&i.InputFirstMsgID,
+		&i.InputLastMsgID,
+		&i.ResponseText,
+		&i.RawPayload,
+		&i.ThoughtSignature,
+		&i.AssistantPayload,
+		&i.AssistantPayloadFormat,
+		&i.CacheExpireAt,
+		&i.CandidateStateJson,
+		&i.ResponseChatID,
+		&i.ResponseMsgID,
+		&i.ErrorCode,
+		&i.ErrorMessage,
+	)
+	return i, err
+}
+
 const getAIRunByRequest = `-- name: GetAIRunByRequest :one
-SELECT id, session_id, request_chat_id, request_msg_id, status, provider, model, requested_at, completed_at, input_tokens, output_tokens, cached_input_tokens, input_message_count, input_first_msg_id, input_last_msg_id, response_text, thought_signature, assistant_payload, assistant_payload_format, cache_expire_at, candidate_state_json, response_chat_id, response_msg_id, error_code, error_message FROM ai_runs
+SELECT id, session_id, request_chat_id, request_msg_id, status, provider, model, requested_at, completed_at, input_tokens, output_tokens, cached_input_tokens, input_message_count, input_first_msg_id, input_last_msg_id, response_text, raw_payload, thought_signature, assistant_payload, assistant_payload_format, cache_expire_at, candidate_state_json, response_chat_id, response_msg_id, error_code, error_message FROM ai_runs
 WHERE session_id=? AND request_chat_id=? AND request_msg_id=?
 `
 
@@ -251,6 +302,7 @@ func (q *Queries) GetAIRunByRequest(ctx context.Context, sessionID int64, reques
 		&i.InputFirstMsgID,
 		&i.InputLastMsgID,
 		&i.ResponseText,
+		&i.RawPayload,
 		&i.ThoughtSignature,
 		&i.AssistantPayload,
 		&i.AssistantPayloadFormat,
@@ -265,7 +317,7 @@ func (q *Queries) GetAIRunByRequest(ctx context.Context, sessionID int64, reques
 }
 
 const getAIRunByResponse = `-- name: GetAIRunByResponse :one
-SELECT id, session_id, request_chat_id, request_msg_id, status, provider, model, requested_at, completed_at, input_tokens, output_tokens, cached_input_tokens, input_message_count, input_first_msg_id, input_last_msg_id, response_text, thought_signature, assistant_payload, assistant_payload_format, cache_expire_at, candidate_state_json, response_chat_id, response_msg_id, error_code, error_message FROM ai_runs WHERE response_chat_id=? AND response_msg_id=?
+SELECT id, session_id, request_chat_id, request_msg_id, status, provider, model, requested_at, completed_at, input_tokens, output_tokens, cached_input_tokens, input_message_count, input_first_msg_id, input_last_msg_id, response_text, raw_payload, thought_signature, assistant_payload, assistant_payload_format, cache_expire_at, candidate_state_json, response_chat_id, response_msg_id, error_code, error_message FROM ai_runs WHERE response_chat_id=? AND response_msg_id=?
 `
 
 func (q *Queries) GetAIRunByResponse(ctx context.Context, responseChatID sql.NullInt64, responseMsgID sql.NullInt64) (AiRun, error) {
@@ -288,6 +340,7 @@ func (q *Queries) GetAIRunByResponse(ctx context.Context, responseChatID sql.Nul
 		&i.InputFirstMsgID,
 		&i.InputLastMsgID,
 		&i.ResponseText,
+		&i.RawPayload,
 		&i.ThoughtSignature,
 		&i.AssistantPayload,
 		&i.AssistantPayloadFormat,
@@ -325,6 +378,23 @@ func (q *Queries) GetAISession(ctx context.Context, id int64) (AiSession, error)
 		&i.HistoryRebuildLossy,
 	)
 	return i, err
+}
+
+const getAISessionIDByMessage = `-- name: GetAISessionIDByMessage :one
+SELECT sm.session_id
+FROM ai_session_messages AS sm
+JOIN ai_sessions AS s ON s.id = sm.session_id
+WHERE sm.chat_id = ?1 AND sm.msg_id = ?2
+  AND sm.context_only=0
+ORDER BY s.updated_at DESC, sm.session_id DESC
+LIMIT 1
+`
+
+func (q *Queries) GetAISessionIDByMessage(ctx context.Context, chatID int64, msgID int64) (int64, error) {
+	row := q.queryRow(ctx, q.getAISessionIDByMessageStmt, getAISessionIDByMessage, chatID, msgID)
+	var session_id int64
+	err := row.Scan(&session_id)
+	return session_id, err
 }
 
 const getAISessionProviderState = `-- name: GetAISessionProviderState :one
@@ -370,6 +440,19 @@ func (q *Queries) GetMediaObject(ctx context.Context, sha256 string) (MediaObjec
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const getNextAISessionMessagePosition = `-- name: GetNextAISessionMessagePosition :one
+SELECT CAST(COALESCE(MAX(position) + 1, 0) AS INTEGER)
+FROM ai_session_messages
+WHERE session_id = ?
+`
+
+func (q *Queries) GetNextAISessionMessagePosition(ctx context.Context, sessionID int64) (int64, error) {
+	row := q.queryRow(ctx, q.getNextAISessionMessagePositionStmt, getNextAISessionMessagePosition, sessionID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const incrementAISessionUsage = `-- name: IncrementAISessionUsage :exec
@@ -498,11 +581,71 @@ func (q *Queries) ListAIMessageMedia(ctx context.Context, chatID int64, msgID in
 	return items, nil
 }
 
+const listAISessionAssistantRuns = `-- name: ListAISessionAssistantRuns :many
+SELECT id, session_id, request_chat_id, request_msg_id, status, provider, model, requested_at, completed_at, input_tokens, output_tokens, cached_input_tokens, input_message_count, input_first_msg_id, input_last_msg_id, response_text, raw_payload, thought_signature, assistant_payload, assistant_payload_format, cache_expire_at, candidate_state_json, response_chat_id, response_msg_id, error_code, error_message FROM ai_runs
+WHERE session_id=? AND status='delivered'
+  AND response_msg_id IS NOT NULL
+  AND assistant_payload IS NOT NULL
+  AND assistant_payload_format IS NOT NULL
+ORDER BY requested_at, id
+`
+
+func (q *Queries) ListAISessionAssistantRuns(ctx context.Context, sessionID int64) ([]AiRun, error) {
+	rows, err := q.query(ctx, q.listAISessionAssistantRunsStmt, listAISessionAssistantRuns, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AiRun
+	for rows.Next() {
+		var i AiRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.RequestChatID,
+			&i.RequestMsgID,
+			&i.Status,
+			&i.Provider,
+			&i.Model,
+			&i.RequestedAt,
+			&i.CompletedAt,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CachedInputTokens,
+			&i.InputMessageCount,
+			&i.InputFirstMsgID,
+			&i.InputLastMsgID,
+			&i.ResponseText,
+			&i.RawPayload,
+			&i.ThoughtSignature,
+			&i.AssistantPayload,
+			&i.AssistantPayloadFormat,
+			&i.CacheExpireAt,
+			&i.CandidateStateJson,
+			&i.ResponseChatID,
+			&i.ResponseMsgID,
+			&i.ErrorCode,
+			&i.ErrorMessage,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAISessionMessages = `-- name: ListAISessionMessages :many
 SELECT sm.session_id, sm.position, sm.chat_id, sm.msg_id, sm.role, sm.quote_part, sm.context_only, m.sent_at, m.user_id, m.username, m.atable_username, m.msg_type, m.text, m.reply_to_msg_id
 FROM ai_session_messages sm
 JOIN ai_messages m ON m.chat_id=sm.chat_id AND m.msg_id=sm.msg_id
 WHERE sm.session_id=?
+  AND sm.context_only=0
 ORDER BY sm.position
 `
 
@@ -588,6 +731,21 @@ func (q *Queries) ListReferencedMediaHashes(ctx context.Context) ([]string, erro
 	return items, nil
 }
 
+const markAIMessageAsUserInput = `-- name: MarkAIMessageAsUserInput :exec
+UPDATE ai_session_messages
+SET role = 'user'
+WHERE chat_id = ?1 AND msg_id = ?2
+  AND NOT EXISTS (
+      SELECT 1 FROM ai_runs
+      WHERE response_chat_id = ?1 AND response_msg_id = ?2
+  )
+`
+
+func (q *Queries) MarkAIMessageAsUserInput(ctx context.Context, chatID int64, msgID int64) error {
+	_, err := q.exec(ctx, q.markAIMessageAsUserInputStmt, markAIMessageAsUserInput, chatID, msgID)
+	return err
+}
+
 const markAIRunDelivered = `-- name: MarkAIRunDelivered :execrows
 UPDATE ai_runs
 SET status='delivered', response_chat_id=?1,
@@ -607,7 +765,7 @@ const markAIRunFailed = `-- name: MarkAIRunFailed :execrows
 UPDATE ai_runs
 SET status=?1, completed_at=?2,
     error_code=?3, error_message=?4
-WHERE id=?5 AND status IN ('pending', 'generated')
+WHERE id=?5 AND status IN ('pending', 'generated', 'delivery_failed')
 `
 
 type MarkAIRunFailedParams struct {
@@ -639,11 +797,12 @@ SET status='generated', completed_at=?1,
     cached_input_tokens=?4,
     input_message_count=?5,
     input_first_msg_id=?6, input_last_msg_id=?7,
-    response_text=?8, thought_signature=?9,
-    assistant_payload=?10, assistant_payload_format=?11,
-    cache_expire_at=?12, candidate_state_json=?13,
+    response_text=?8, raw_payload=?9,
+    thought_signature=?10,
+    assistant_payload=?11, assistant_payload_format=?12,
+    cache_expire_at=?13, candidate_state_json=?14,
     error_code=NULL, error_message=NULL
-WHERE id=?14 AND status='pending'
+WHERE id=?15 AND status='pending'
 `
 
 type MarkAIRunGeneratedParams struct {
@@ -655,6 +814,7 @@ type MarkAIRunGeneratedParams struct {
 	InputFirstMsgID        sql.NullInt64  `json:"input_first_msg_id"`
 	InputLastMsgID         sql.NullInt64  `json:"input_last_msg_id"`
 	ResponseText           sql.NullString `json:"response_text"`
+	RawPayload             []byte         `json:"raw_payload"`
 	ThoughtSignature       sql.NullString `json:"thought_signature"`
 	AssistantPayload       []byte         `json:"assistant_payload"`
 	AssistantPayloadFormat sql.NullString `json:"assistant_payload_format"`
@@ -673,6 +833,7 @@ func (q *Queries) MarkAIRunGenerated(ctx context.Context, arg MarkAIRunGenerated
 		arg.InputFirstMsgID,
 		arg.InputLastMsgID,
 		arg.ResponseText,
+		arg.RawPayload,
 		arg.ThoughtSignature,
 		arg.AssistantPayload,
 		arg.AssistantPayloadFormat,
@@ -684,6 +845,34 @@ func (q *Queries) MarkAIRunGenerated(ctx context.Context, arg MarkAIRunGenerated
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const setAIChatModelSetting = `-- name: SetAIChatModelSetting :one
+INSERT INTO ai_chat_settings(chat_id, default_provider, default_model, show_usage, updated_at)
+VALUES (?1, ?2, ?3, 0, ?4)
+ON CONFLICT(chat_id) DO UPDATE SET
+    default_provider=excluded.default_provider,
+    default_model=excluded.default_model,
+    updated_at=excluded.updated_at
+RETURNING chat_id, default_provider, default_model, show_usage, updated_at
+`
+
+func (q *Queries) SetAIChatModelSetting(ctx context.Context, chatID int64, defaultProvider string, defaultModel string, updatedAt int64) (AiChatSetting, error) {
+	row := q.queryRow(ctx, q.setAIChatModelSettingStmt, setAIChatModelSetting,
+		chatID,
+		defaultProvider,
+		defaultModel,
+		updatedAt,
+	)
+	var i AiChatSetting
+	err := row.Scan(
+		&i.ChatID,
+		&i.DefaultProvider,
+		&i.DefaultModel,
+		&i.ShowUsage,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const setAISessionModel = `-- name: SetAISessionModel :exec
@@ -715,14 +904,21 @@ func (q *Queries) SetAISessionStatus(ctx context.Context, status string, updated
 }
 
 const toggleAIChatSettingsUsage = `-- name: ToggleAIChatSettingsUsage :one
-UPDATE ai_chat_settings
-SET show_usage = NOT show_usage, updated_at = ?1
-WHERE chat_id = ?2
+INSERT INTO ai_chat_settings(chat_id, default_provider, default_model, show_usage, updated_at)
+VALUES (?1, ?2, ?3, 1, ?4)
+ON CONFLICT(chat_id) DO UPDATE SET
+    show_usage=NOT ai_chat_settings.show_usage,
+    updated_at=excluded.updated_at
 RETURNING chat_id, default_provider, default_model, show_usage, updated_at
 `
 
-func (q *Queries) ToggleAIChatSettingsUsage(ctx context.Context, updatedAt int64, chatID int64) (AiChatSetting, error) {
-	row := q.queryRow(ctx, q.toggleAIChatSettingsUsageStmt, toggleAIChatSettingsUsage, updatedAt, chatID)
+func (q *Queries) ToggleAIChatSettingsUsage(ctx context.Context, chatID int64, defaultProvider string, defaultModel string, updatedAt int64) (AiChatSetting, error) {
+	row := q.queryRow(ctx, q.toggleAIChatSettingsUsageStmt, toggleAIChatSettingsUsage,
+		chatID,
+		defaultProvider,
+		defaultModel,
+		updatedAt,
+	)
 	var i AiChatSetting
 	err := row.Scan(
 		&i.ChatID,
@@ -732,6 +928,15 @@ func (q *Queries) ToggleAIChatSettingsUsage(ctx context.Context, updatedAt int64
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const touchAISession = `-- name: TouchAISession :exec
+UPDATE ai_sessions SET updated_at=?1 WHERE id=?2
+`
+
+func (q *Queries) TouchAISession(ctx context.Context, updatedAt int64, sessionID int64) error {
+	_, err := q.exec(ctx, q.touchAISessionStmt, touchAISession, updatedAt, sessionID)
+	return err
 }
 
 const upsertAIChatSettings = `-- name: UpsertAIChatSettings :one

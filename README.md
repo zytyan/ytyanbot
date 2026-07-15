@@ -158,7 +158,8 @@ npm run dev
 
 - SQLite schema 和查询定义位于 `sql/`。
 - sqlc 配置位于 `sqlc.yaml`。
-- 生成后的 Go 查询代码位于 `globalcfg/q` 和 `globalcfg/msgs`。
+- 通用 AI V2 schema/query 生成到 `globalcfg/aiq`；其他业务查询生成到 `globalcfg/q` 和 `globalcfg/msgs`。
+- AI 请求先保存为 `pending` Run，再分别记录模型生成与 Telegram 投递结果；失败投递会保留模型载荷用于恢复或重发。
 - `scripts/migrate_sqlite.py` 可用于将旧 SQLite 数据迁移到当前 schema。
 
 如果修改了 SQL schema 或 query，需要同步更新/重新生成对应 sqlc 产物，并补充相关测试。

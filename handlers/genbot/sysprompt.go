@@ -4,6 +4,7 @@ import (
 	"context"
 	g "main/globalcfg"
 	"main/globalcfg/h"
+	"time"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
@@ -33,7 +34,7 @@ CHAT_TYPE: 聊天类型(group, private)
 			return err
 		}
 	}
-	err := g.Q.CreateOrUpdateGeminiSystemPrompt(context.Background(), msg.Chat.Id, msg.MessageThreadId, prompt)
+	err := g.AIQ.UpsertAISystemPrompt(context.Background(), msg.Chat.Id, msg.MessageThreadId, prompt, time.Now().Unix())
 	if err != nil {
 		_, err = msg.Reply(bot, "设置系统提示词错误: "+err.Error(), nil)
 		return err
@@ -43,7 +44,7 @@ CHAT_TYPE: 聊天类型(group, private)
 }
 func ResetGeminiSysPrompt(bot *gotgbot.Bot, ctx *ext.Context) error {
 	delete(sysPromptReplacerCache, newTopic(ctx.EffectiveMessage))
-	err := g.Q.ResetGeminiSystemPrompt(context.Background(), ctx.EffectiveChat.Id, ctx.EffectiveMessage.MessageThreadId)
+	err := g.AIQ.DeleteAISystemPrompt(context.Background(), ctx.EffectiveChat.Id, ctx.EffectiveMessage.MessageThreadId)
 	if err != nil {
 		_, err = ctx.EffectiveMessage.Reply(bot, err.Error(), nil)
 		return err
@@ -52,7 +53,7 @@ func ResetGeminiSysPrompt(bot *gotgbot.Bot, ctx *ext.Context) error {
 	return err
 }
 func GetGeminiSysPrompt(bot *gotgbot.Bot, ctx *ext.Context) error {
-	prompt, err := g.Q.GetGeminiSystemPrompt(context.Background(), ctx.EffectiveChat.Id, ctx.EffectiveMessage.MessageThreadId)
+	prompt, err := g.AIQ.GetAISystemPrompt(context.Background(), ctx.EffectiveChat.Id, ctx.EffectiveMessage.MessageThreadId)
 	if err != nil {
 		_, err = ctx.EffectiveMessage.Reply(bot, gDefaultSysPrompt, nil)
 		return err

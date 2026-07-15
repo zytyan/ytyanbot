@@ -28,7 +28,6 @@ sql:
       - "sql/query_chat.sql"
       - "sql/query_coc.sql"
       - "sql/query_pics.sql"
-      - "sql/query_gemini.sql"
       - "sql/query_user.sql"
       - "sql/query_ytdl.sql"
     schema:
@@ -36,7 +35,6 @@ sql:
       - "sql/schema_chat.sql"
       - "sql/schema_coc.sql"
       - "sql/schema_pics.sql"
-      - "sql/schema_gemini.sql"
       - "sql/schema_user.sql"
       - "sql/schema_ytdl.sql"
     gen:

@@ -69,9 +69,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.updateChatStatDailyStmt, err = db.PrepareContext(ctx, updateChatStatDaily); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateChatStatDaily: %w", err)
 	}
-	if q.updateChatTopicNameStmt, err = db.PrepareContext(ctx, updateChatTopicName); err != nil {
-		return nil, fmt.Errorf("error preparing query UpdateChatTopicName: %w", err)
-	}
 	if q.updateYtDlpCacheStmt, err = db.PrepareContext(ctx, updateYtDlpCache); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateYtDlpCache: %w", err)
 	}
@@ -84,17 +81,11 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.createNsfwPicUserRateStmt, err = db.PrepareContext(ctx, createNsfwPicUserRate); err != nil {
 		return nil, fmt.Errorf("error preparing query createNsfwPicUserRate: %w", err)
 	}
-	if q.createOrUpdateChatAttrStmt, err = db.PrepareContext(ctx, createOrUpdateChatAttr); err != nil {
-		return nil, fmt.Errorf("error preparing query createOrUpdateChatAttr: %w", err)
-	}
 	if q.createOrUpdateNsfwPicStmt, err = db.PrepareContext(ctx, createOrUpdateNsfwPic); err != nil {
 		return nil, fmt.Errorf("error preparing query createOrUpdateNsfwPic: %w", err)
 	}
 	if q.getChatCfgByIdStmt, err = db.PrepareContext(ctx, getChatCfgById); err != nil {
 		return nil, fmt.Errorf("error preparing query getChatCfgById: %w", err)
-	}
-	if q.getChatIdByWebIdStmt, err = db.PrepareContext(ctx, getChatIdByWebId); err != nil {
-		return nil, fmt.Errorf("error preparing query getChatIdByWebId: %w", err)
 	}
 	if q.getChatStatStmt, err = db.PrepareContext(ctx, getChatStat); err != nil {
 		return nil, fmt.Errorf("error preparing query getChatStat: %w", err)
@@ -122,12 +113,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.updateUserBaseStmt, err = db.PrepareContext(ctx, updateUserBase); err != nil {
 		return nil, fmt.Errorf("error preparing query updateUserBase: %w", err)
-	}
-	if q.updateUserProfilePhotoStmt, err = db.PrepareContext(ctx, updateUserProfilePhoto); err != nil {
-		return nil, fmt.Errorf("error preparing query updateUserProfilePhoto: %w", err)
-	}
-	if q.updateUserTimeZoneStmt, err = db.PrepareContext(ctx, updateUserTimeZone); err != nil {
-		return nil, fmt.Errorf("error preparing query updateUserTimeZone: %w", err)
 	}
 	return &q, nil
 }
@@ -209,11 +194,6 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing updateChatStatDailyStmt: %w", cerr)
 		}
 	}
-	if q.updateChatTopicNameStmt != nil {
-		if cerr := q.updateChatTopicNameStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing updateChatTopicNameStmt: %w", cerr)
-		}
-	}
 	if q.updateYtDlpCacheStmt != nil {
 		if cerr := q.updateYtDlpCacheStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateYtDlpCacheStmt: %w", cerr)
@@ -234,11 +214,6 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing createNsfwPicUserRateStmt: %w", cerr)
 		}
 	}
-	if q.createOrUpdateChatAttrStmt != nil {
-		if cerr := q.createOrUpdateChatAttrStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing createOrUpdateChatAttrStmt: %w", cerr)
-		}
-	}
 	if q.createOrUpdateNsfwPicStmt != nil {
 		if cerr := q.createOrUpdateNsfwPicStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing createOrUpdateNsfwPicStmt: %w", cerr)
@@ -247,11 +222,6 @@ func (q *Queries) Close() error {
 	if q.getChatCfgByIdStmt != nil {
 		if cerr := q.getChatCfgByIdStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getChatCfgByIdStmt: %w", cerr)
-		}
-	}
-	if q.getChatIdByWebIdStmt != nil {
-		if cerr := q.getChatIdByWebIdStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing getChatIdByWebIdStmt: %w", cerr)
 		}
 	}
 	if q.getChatStatStmt != nil {
@@ -297,16 +267,6 @@ func (q *Queries) Close() error {
 	if q.updateUserBaseStmt != nil {
 		if cerr := q.updateUserBaseStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateUserBaseStmt: %w", cerr)
-		}
-	}
-	if q.updateUserProfilePhotoStmt != nil {
-		if cerr := q.updateUserProfilePhotoStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing updateUserProfilePhotoStmt: %w", cerr)
-		}
-	}
-	if q.updateUserTimeZoneStmt != nil {
-		if cerr := q.updateUserTimeZoneStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing updateUserTimeZoneStmt: %w", cerr)
 		}
 	}
 	return err
@@ -363,15 +323,12 @@ type Queries struct {
 	setPrprCacheStmt                  *sql.Stmt
 	updateBiliInlineMsgIdStmt         *sql.Stmt
 	updateChatStatDailyStmt           *sql.Stmt
-	updateChatTopicNameStmt           *sql.Stmt
 	updateYtDlpCacheStmt              *sql.Stmt
 	createChatStatDailyStmt           *sql.Stmt
 	createNewUserStmt                 *sql.Stmt
 	createNsfwPicUserRateStmt         *sql.Stmt
-	createOrUpdateChatAttrStmt        *sql.Stmt
 	createOrUpdateNsfwPicStmt         *sql.Stmt
 	getChatCfgByIdStmt                *sql.Stmt
-	getChatIdByWebIdStmt              *sql.Stmt
 	getChatStatStmt                   *sql.Stmt
 	getNsfwPicByRateAndRandKeyStmt    *sql.Stmt
 	getNsfwPicByRateFirstStmt         *sql.Stmt
@@ -381,8 +338,6 @@ type Queries struct {
 	updateChatCfgStmt                 *sql.Stmt
 	updateNsfwPicUserRateStmt         *sql.Stmt
 	updateUserBaseStmt                *sql.Stmt
-	updateUserProfilePhotoStmt        *sql.Stmt
-	updateUserTimeZoneStmt            *sql.Stmt
 }
 
 func (q *Queries) WithTx(tx *sql.Tx) *Queries {
@@ -404,15 +359,12 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		setPrprCacheStmt:                  q.setPrprCacheStmt,
 		updateBiliInlineMsgIdStmt:         q.updateBiliInlineMsgIdStmt,
 		updateChatStatDailyStmt:           q.updateChatStatDailyStmt,
-		updateChatTopicNameStmt:           q.updateChatTopicNameStmt,
 		updateYtDlpCacheStmt:              q.updateYtDlpCacheStmt,
 		createChatStatDailyStmt:           q.createChatStatDailyStmt,
 		createNewUserStmt:                 q.createNewUserStmt,
 		createNsfwPicUserRateStmt:         q.createNsfwPicUserRateStmt,
-		createOrUpdateChatAttrStmt:        q.createOrUpdateChatAttrStmt,
 		createOrUpdateNsfwPicStmt:         q.createOrUpdateNsfwPicStmt,
 		getChatCfgByIdStmt:                q.getChatCfgByIdStmt,
-		getChatIdByWebIdStmt:              q.getChatIdByWebIdStmt,
 		getChatStatStmt:                   q.getChatStatStmt,
 		getNsfwPicByRateAndRandKeyStmt:    q.getNsfwPicByRateAndRandKeyStmt,
 		getNsfwPicByRateFirstStmt:         q.getNsfwPicByRateFirstStmt,
@@ -422,7 +374,5 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateChatCfgStmt:                 q.updateChatCfgStmt,
 		updateNsfwPicUserRateStmt:         q.updateNsfwPicUserRateStmt,
 		updateUserBaseStmt:                q.updateUserBaseStmt,
-		updateUserProfilePhotoStmt:        q.updateUserProfilePhotoStmt,
-		updateUserTimeZoneStmt:            q.updateUserTimeZoneStmt,
 	}
 }

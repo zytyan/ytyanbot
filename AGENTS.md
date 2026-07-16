@@ -12,6 +12,7 @@ These instructions apply to the whole repository.
 - Main-database migration runners live in `internal/mainmigrations`; `globalcfg/migrations.go` is only the runtime adapter. Use `cmd/db-init` for a new canonical database and `cmd/main-db-migrate` for post-V2 offline rewrites. Never initialize or rewrite a production database in place.
 - `sql.Canonical()` is the explicit fresh-database schema list. Migration-only legacy schemas belong under `sql/migrate/`; do not restore glob-based `schema_*.sql` loading.
 - The legacy message SQLite database, Meilisearch writer/WAL, and search HTTP backend are retired. Preserve their verified offline archive, but do not restore runtime connections or configuration without a new product requirement.
+- Main schema V4 retires `chat_attr`, `chat_topics`, and the `web_id`/automatic-OCR/message-archive chat settings. `users` is a lightweight Telegram name dimension keyed directly by `user_id`; do not restore profile-photo or per-user timezone persistence.
 - Configure SQLite connection-wide behavior through the DSN or a connection hook so every pooled connection enables foreign keys and the same timeout/journal settings.
 - A SQL change is accepted only after a second `sqlc generate` is idempotent, targeted tests pass, `go test ./...` passes, and the project builds completely.
 

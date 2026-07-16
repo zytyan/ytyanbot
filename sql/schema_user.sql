@@ -2,16 +2,12 @@
 
 CREATE TABLE IF NOT EXISTS users
 (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    updated_at        INT_UNIX_SEC NOT NULL,
-    user_id           INTEGER      NOT NULL UNIQUE,
-    first_name        TEXT         NOT NULL,
-    last_name         TEXT,
-    username          TEXT,
-    profile_update_at INT_UNIX_SEC NOT NULL,
-    profile_photo     TEXT,
-    timezone          INTEGER      NOT NULL DEFAULT 480 -- 8:00，+8小时
-);
+    user_id    INTEGER      NOT NULL PRIMARY KEY,
+    updated_at INT_UNIX_SEC NOT NULL,
+    first_name TEXT         NOT NULL,
+    last_name  TEXT,
+    username   TEXT
+) WITHOUT ROWID;
 
 CREATE TABLE IF NOT EXISTS prpr_caches
 (

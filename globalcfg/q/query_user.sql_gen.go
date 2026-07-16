@@ -26,6 +26,7 @@ func (q *Queries) GetPrprCache(ctx context.Context, profilePhotoUid string) (str
 const setPrprCache = `-- name: SetPrprCache :exec
 INSERT INTO prpr_caches (profile_photo_uid, prpr_file_id)
 VALUES (?, ?)
+ON CONFLICT(profile_photo_uid) DO UPDATE SET prpr_file_id=excluded.prpr_file_id
 `
 
 func (q *Queries) SetPrprCache(ctx context.Context, profilePhotoUid string, prprFileID string) error {
@@ -34,39 +35,41 @@ func (q *Queries) SetPrprCache(ctx context.Context, profilePhotoUid string, prpr
 }
 
 const createNewUser = `-- name: createNewUser :one
-INSERT INTO users (updated_at, user_id, first_name, last_name, username, profile_update_at, profile_photo, timezone)
-VALUES (?1, ?2, ?3, ?4, ?5, ?1, ?6, ?7)
-RETURNING id
+INSERT INTO users (updated_at, user_id, first_name, last_name, username)
+VALUES (?, ?, ?, ?, ?)
+RETURNING user_id, updated_at, first_name, last_name, username
 `
 
 type createNewUserParams struct {
-	UpdatedAt    UnixTime       `json:"updated_at"`
-	UserID       int64          `json:"user_id"`
-	FirstName    string         `json:"first_name"`
-	LastName     sql.NullString `json:"last_name"`
-	Username     sql.NullString `json:"username"`
-	ProfilePhoto sql.NullString `json:"profile_photo"`
-	Timezone     int64          `json:"timezone"`
+	UpdatedAt UnixTime       `json:"updated_at"`
+	UserID    int64          `json:"user_id"`
+	FirstName string         `json:"first_name"`
+	LastName  sql.NullString `json:"last_name"`
+	Username  sql.NullString `json:"username"`
 }
 
-func (q *Queries) createNewUser(ctx context.Context, arg createNewUserParams) (int64, error) {
+func (q *Queries) createNewUser(ctx context.Context, arg createNewUserParams) (User, error) {
 	row := q.queryRow(ctx, q.createNewUserStmt, createNewUser,
 		arg.UpdatedAt,
 		arg.UserID,
 		arg.FirstName,
 		arg.LastName,
 		arg.Username,
-		arg.ProfilePhoto,
-		arg.Timezone,
 	)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
+	var i User
+	err := row.Scan(
+		&i.UserID,
+		&i.UpdatedAt,
+		&i.FirstName,
+		&i.LastName,
+		&i.Username,
+	)
+	return i, err
 }
 
 const getUserById = `-- name: getUserById :one
 
-SELECT id, updated_at, user_id, first_name, last_name, username, profile_update_at, profile_photo, timezone
+SELECT user_id, updated_at, first_name, last_name, username
 FROM users
 WHERE user_id = ?
 `
@@ -76,15 +79,11 @@ func (q *Queries) getUserById(ctx context.Context, userID int64) (User, error) {
 	row := q.queryRow(ctx, q.getUserByIdStmt, getUserById, userID)
 	var i User
 	err := row.Scan(
-		&i.ID,
-		&i.UpdatedAt,
 		&i.UserID,
+		&i.UpdatedAt,
 		&i.FirstName,
 		&i.LastName,
 		&i.Username,
-		&i.ProfileUpdateAt,
-		&i.ProfilePhoto,
-		&i.Timezone,
 	)
 	return i, err
 }
@@ -96,7 +95,7 @@ SET updated_at=?2,
     last_name =?4,
     username  = ?5
 WHERE user_id = ?1
-RETURNING id
+RETURNING user_id, updated_at, first_name, last_name, username
 `
 
 type updateUserBaseParams struct {
@@ -107,7 +106,7 @@ type updateUserBaseParams struct {
 	Username  sql.NullString `json:"username"`
 }
 
-func (q *Queries) updateUserBase(ctx context.Context, arg updateUserBaseParams) (int64, error) {
+func (q *Queries) updateUserBase(ctx context.Context, arg updateUserBaseParams) (User, error) {
 	row := q.queryRow(ctx, q.updateUserBaseStmt, updateUserBase,
 		arg.UserID,
 		arg.UpdatedAt,
@@ -115,31 +114,13 @@ func (q *Queries) updateUserBase(ctx context.Context, arg updateUserBaseParams) 
 		arg.LastName,
 		arg.Username,
 	)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
-}
-
-const updateUserProfilePhoto = `-- name: updateUserProfilePhoto :exec
-UPDATE users
-SET profile_update_at = ?2,
-    profile_photo     = ?3
-WHERE user_id = ?1
-`
-
-func (q *Queries) updateUserProfilePhoto(ctx context.Context, userID int64, profileUpdateAt UnixTime, profilePhoto sql.NullString) error {
-	_, err := q.exec(ctx, q.updateUserProfilePhotoStmt, updateUserProfilePhoto, userID, profileUpdateAt, profilePhoto)
-	return err
-}
-
-const updateUserTimeZone = `-- name: updateUserTimeZone :exec
-UPDATE users
-SET timezone = ?2
-WHERE user_id = ?1
-RETURNING id
-`
-
-func (q *Queries) updateUserTimeZone(ctx context.Context, userID int64, timezone int64) error {
-	_, err := q.exec(ctx, q.updateUserTimeZoneStmt, updateUserTimeZone, userID, timezone)
-	return err
+	var i User
+	err := row.Scan(
+		&i.UserID,
+		&i.UpdatedAt,
+		&i.FirstName,
+		&i.LastName,
+		&i.Username,
+	)
+	return i, err
 }

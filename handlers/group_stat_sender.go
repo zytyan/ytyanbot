@@ -82,6 +82,7 @@ func formatStatMessage(chatId int64, stat *q.ChatStatDaily, timezone int64) stri
 	for i := 0; i < 3 && i < len(actUser); i++ {
 		user, err := g.Q.GetUserById(context.Background(), actUser[i])
 		if err != nil {
+			act3Users = append(act3Users, fmt.Sprintf("用户%d", actUser[i]))
 			continue
 		}
 		act3Users = append(act3Users, user.Name())

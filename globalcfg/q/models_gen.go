@@ -21,16 +21,6 @@ type CharacterAttr struct {
 	AttrValue string `json:"attr_value"`
 }
 
-type ChatAttr struct {
-	ID        int64          `json:"id"`
-	Type      string         `json:"type"`
-	Title     sql.NullString `json:"title"`
-	Username  sql.NullString `json:"username"`
-	FirstName sql.NullString `json:"first_name"`
-	LastName  sql.NullString `json:"last_name"`
-	IsForum   bool           `json:"is_forum"`
-}
-
 type ChatStatDaily struct {
 	ChatID             int64          `json:"chat_id"`
 	StatDate           int64          `json:"stat_date"`
@@ -50,12 +40,6 @@ type ChatStatDaily struct {
 	UserMsgStat        UserMsgStatMap `json:"user_msg_stat"`
 	MsgCountByTime     TenMinuteStats `json:"msg_count_by_time"`
 	MsgIDAtTimeStart   TenMinuteStats `json:"msg_id_at_time_start"`
-}
-
-type ChatTopic struct {
-	ChatID   int64  `json:"chat_id"`
-	ThreadID int64  `json:"thread_id"`
-	Name     string `json:"name"`
 }
 
 type PicRateCounter struct {
@@ -85,15 +69,11 @@ type SavedPicsRating struct {
 }
 
 type User struct {
-	ID              int64          `json:"id"`
-	UpdatedAt       UnixTime       `json:"updated_at"`
-	UserID          int64          `json:"user_id"`
-	FirstName       string         `json:"first_name"`
-	LastName        sql.NullString `json:"last_name"`
-	Username        sql.NullString `json:"username"`
-	ProfileUpdateAt UnixTime       `json:"profile_update_at"`
-	ProfilePhoto    sql.NullString `json:"profile_photo"`
-	Timezone        int64          `json:"timezone"`
+	UserID    int64          `json:"user_id"`
+	UpdatedAt UnixTime       `json:"updated_at"`
+	FirstName string         `json:"first_name"`
+	LastName  sql.NullString `json:"last_name"`
+	Username  sql.NullString `json:"username"`
 }
 
 type YtDlResult struct {
@@ -108,15 +88,12 @@ type YtDlResult struct {
 }
 
 type chatCfg struct {
-	ID             int64         `json:"id"`
-	WebID          sql.NullInt64 `json:"web_id"`
-	AutoCvtBili    bool          `json:"auto_cvt_bili"`
-	AutoOcr        bool          `json:"auto_ocr"`
-	AutoCalculate  bool          `json:"auto_calculate"`
-	AutoExchange   bool          `json:"auto_exchange"`
-	AutoCheckAdult bool          `json:"auto_check_adult"`
-	SaveMessages   bool          `json:"save_messages"`
-	EnableCoc      bool          `json:"enable_coc"`
-	RespNsfwMsg    bool          `json:"resp_nsfw_msg"`
-	Timezone       int64         `json:"timezone"`
+	ID             int64 `json:"id"`
+	AutoCvtBili    bool  `json:"auto_cvt_bili"`
+	AutoCalculate  bool  `json:"auto_calculate"`
+	AutoExchange   bool  `json:"auto_exchange"`
+	AutoCheckAdult bool  `json:"auto_check_adult"`
+	EnableCoc      bool  `json:"enable_coc"`
+	RespNsfwMsg    bool  `json:"resp_nsfw_msg"`
+	Timezone       int64 `json:"timezone"`
 }

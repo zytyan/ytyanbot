@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"main/globalcfg/aiq"
 	"main/globalcfg/migrationdefs"
 	"main/internal/dbschema"
 	"main/internal/mainmigrations"
@@ -36,9 +37,26 @@ type Manifest struct {
 	OutputSHA256     string           `json:"output_sha256"`
 	SourceCounts     map[string]int64 `json:"source_counts"`
 	TargetCounts     map[string]int64 `json:"target_counts"`
+	SourceAI         AIStats          `json:"source_ai"`
+	TargetAI         AIStats          `json:"target_ai"`
 	IntegrityCheck   string           `json:"integrity_check"`
 	ForeignKeyIssues int64            `json:"foreign_key_issues"`
 	SourceUnchanged  bool             `json:"source_unchanged"`
+}
+
+type AIStats struct {
+	Sessions          int64 `json:"sessions"`
+	Messages          int64 `json:"messages"`
+	SessionMessages   int64 `json:"session_messages"`
+	Runs              int64 `json:"runs"`
+	Prompts           int64 `json:"prompts"`
+	ChatSettings      int64 `json:"chat_settings"`
+	MediaObjects      int64 `json:"media_objects"`
+	MediaReferences   int64 `json:"media_references"`
+	AssistantPayloads int64 `json:"assistant_payloads"`
+	InputTokens       int64 `json:"input_tokens"`
+	OutputTokens      int64 `json:"output_tokens"`
+	CachedInputTokens int64 `json:"cached_input_tokens"`
 }
 
 func Run(ctx context.Context, cfg Config) (manifest Manifest, err error) {
@@ -67,6 +85,10 @@ func Run(ctx context.Context, cfg Config) (manifest Manifest, err error) {
 	if err != nil {
 		return manifest, err
 	}
+	manifest.SourceAI, err = readAIStats(ctx, source)
+	if err != nil {
+		return manifest, err
+	}
 	stagingPath := cfg.Output + ".staging"
 	finalPath := cfg.Output + ".vacuum"
 	if err = ensureAbsent(stagingPath, finalPath); err != nil {
@@ -86,6 +108,15 @@ func Run(ctx context.Context, cfg Config) (manifest Manifest, err error) {
 	}
 	if err == nil {
 		manifest.TargetCounts, err = tableCounts(ctx, staging)
+	}
+	if err == nil {
+		err = validatePreservedCounts(manifest.SourceCounts, manifest.TargetCounts)
+	}
+	if err == nil {
+		manifest.TargetAI, err = readAIStats(ctx, staging)
+	}
+	if err == nil && manifest.TargetAI != manifest.SourceAI {
+		err = fmt.Errorf("AI counts or tokens changed: source=%+v target=%+v", manifest.SourceAI, manifest.TargetAI)
 	}
 	if err == nil {
 		_, err = staging.ExecContext(ctx, `VACUUM INTO ?`, finalPath)
@@ -295,6 +326,13 @@ func validateFile(ctx context.Context, path string, manifest *Manifest) error {
 	if !equalCounts(counts, manifest.TargetCounts) {
 		return fmt.Errorf("final row counts changed: vacuum=%v staging=%v", counts, manifest.TargetCounts)
 	}
+	stats, err := readAIStats(ctx, database)
+	if err != nil {
+		return err
+	}
+	if stats != manifest.TargetAI {
+		return fmt.Errorf("final AI counts or tokens changed: vacuum=%+v staging=%+v", stats, manifest.TargetAI)
+	}
 	return nil
 }
 
@@ -308,6 +346,29 @@ func equalCounts(left, right map[string]int64) bool {
 		}
 	}
 	return true
+}
+
+func validatePreservedCounts(source, target map[string]int64) error {
+	for table, targetCount := range target {
+		if sourceCount, existed := source[table]; existed && sourceCount != targetCount {
+			return fmt.Errorf("preserved table %s row count changed: source=%d target=%d", table, sourceCount, targetCount)
+		}
+	}
+	return nil
+}
+
+func readAIStats(ctx context.Context, database *sql.DB) (AIStats, error) {
+	row, err := aiq.New(database).GetAIMigrationStats(ctx)
+	if err != nil {
+		return AIStats{}, err
+	}
+	return AIStats{
+		Sessions: row.Sessions, Messages: row.Messages, SessionMessages: row.SessionMessages,
+		Runs: row.Runs, Prompts: row.Prompts, ChatSettings: row.ChatSettings,
+		MediaObjects: row.MediaObjects, MediaReferences: row.MediaReferences,
+		AssistantPayloads: row.AssistantPayloads, InputTokens: row.InputTokens,
+		OutputTokens: row.OutputTokens, CachedInputTokens: row.CachedInputTokens,
+	}, nil
 }
 
 func fileSHA256(path string) (string, error) {

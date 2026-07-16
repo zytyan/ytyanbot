@@ -7,40 +7,32 @@ package q
 
 import (
 	"context"
-	"database/sql"
 )
 
 const createChatCfg = `-- name: CreateChatCfg :exec
-INSERT INTO chat_cfg (id, web_id, auto_cvt_bili, auto_ocr, auto_calculate, auto_exchange, auto_check_adult,
-                      save_messages, enable_coc, resp_nsfw_msg, timezone)
-VALUES (?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?)
+INSERT INTO chat_cfg (id, auto_cvt_bili, auto_calculate, auto_exchange, auto_check_adult,
+                      enable_coc, resp_nsfw_msg, timezone)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateChatCfgParams struct {
-	ID             int64         `json:"id"`
-	WebID          sql.NullInt64 `json:"web_id"`
-	AutoCvtBili    bool          `json:"auto_cvt_bili"`
-	AutoOcr        bool          `json:"auto_ocr"`
-	AutoCalculate  bool          `json:"auto_calculate"`
-	AutoExchange   bool          `json:"auto_exchange"`
-	AutoCheckAdult bool          `json:"auto_check_adult"`
-	SaveMessages   bool          `json:"save_messages"`
-	EnableCoc      bool          `json:"enable_coc"`
-	RespNsfwMsg    bool          `json:"resp_nsfw_msg"`
-	Timezone       int64         `json:"timezone"`
+	ID             int64 `json:"id"`
+	AutoCvtBili    bool  `json:"auto_cvt_bili"`
+	AutoCalculate  bool  `json:"auto_calculate"`
+	AutoExchange   bool  `json:"auto_exchange"`
+	AutoCheckAdult bool  `json:"auto_check_adult"`
+	EnableCoc      bool  `json:"enable_coc"`
+	RespNsfwMsg    bool  `json:"resp_nsfw_msg"`
+	Timezone       int64 `json:"timezone"`
 }
 
 func (q *Queries) CreateChatCfg(ctx context.Context, arg CreateChatCfgParams) error {
 	_, err := q.exec(ctx, q.createChatCfgStmt, createChatCfg,
 		arg.ID,
-		arg.WebID,
 		arg.AutoCvtBili,
-		arg.AutoOcr,
 		arg.AutoCalculate,
 		arg.AutoExchange,
 		arg.AutoCheckAdult,
-		arg.SaveMessages,
 		arg.EnableCoc,
 		arg.RespNsfwMsg,
 		arg.Timezone,
@@ -115,19 +107,6 @@ func (q *Queries) UpdateChatStatDaily(ctx context.Context, arg UpdateChatStatDai
 	return err
 }
 
-const updateChatTopicName = `-- name: UpdateChatTopicName :exec
-;
-
-INSERT INTO chat_topics (chat_id, thread_id, name)
-VALUES (?, ?, ?)
-ON CONFLICT DO UPDATE SET name=excluded.name
-`
-
-func (q *Queries) UpdateChatTopicName(ctx context.Context, chatID int64, threadID int64, name string) error {
-	_, err := q.exec(ctx, q.updateChatTopicNameStmt, updateChatTopicName, chatID, threadID, name)
-	return err
-}
-
 const createChatStatDaily = `-- name: createChatStatDaily :one
 INSERT INTO chat_stat_daily (chat_id, stat_date)
 VALUES (?, ?)
@@ -160,43 +139,9 @@ func (q *Queries) createChatStatDaily(ctx context.Context, chatID int64, statDat
 	return i, err
 }
 
-const createOrUpdateChatAttr = `-- name: createOrUpdateChatAttr :exec
-INSERT INTO chat_attr (id, type, title, username, first_name, last_name, is_forum)
-VALUES (?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT DO UPDATE SET type=excluded.type,
-                          title=excluded.title,
-                          username=excluded.username,
-                          first_name=excluded.first_name,
-                          last_name=excluded.last_name,
-                          is_forum=excluded.is_forum
-`
-
-type createOrUpdateChatAttrParams struct {
-	ID        int64          `json:"id"`
-	Type      string         `json:"type"`
-	Title     sql.NullString `json:"title"`
-	Username  sql.NullString `json:"username"`
-	FirstName sql.NullString `json:"first_name"`
-	LastName  sql.NullString `json:"last_name"`
-	IsForum   bool           `json:"is_forum"`
-}
-
-func (q *Queries) createOrUpdateChatAttr(ctx context.Context, arg createOrUpdateChatAttrParams) error {
-	_, err := q.exec(ctx, q.createOrUpdateChatAttrStmt, createOrUpdateChatAttr,
-		arg.ID,
-		arg.Type,
-		arg.Title,
-		arg.Username,
-		arg.FirstName,
-		arg.LastName,
-		arg.IsForum,
-	)
-	return err
-}
-
 const getChatCfgById = `-- name: getChatCfgById :one
 
-SELECT id, web_id, auto_cvt_bili, auto_ocr, auto_calculate, auto_exchange, auto_check_adult, save_messages, enable_coc, resp_nsfw_msg, timezone
+SELECT id, auto_cvt_bili, auto_calculate, auto_exchange, auto_check_adult, enable_coc, resp_nsfw_msg, timezone
 FROM chat_cfg
 WHERE id = ?
 `
@@ -207,31 +152,15 @@ func (q *Queries) getChatCfgById(ctx context.Context, id int64) (chatCfg, error)
 	var i chatCfg
 	err := row.Scan(
 		&i.ID,
-		&i.WebID,
 		&i.AutoCvtBili,
-		&i.AutoOcr,
 		&i.AutoCalculate,
 		&i.AutoExchange,
 		&i.AutoCheckAdult,
-		&i.SaveMessages,
 		&i.EnableCoc,
 		&i.RespNsfwMsg,
 		&i.Timezone,
 	)
 	return i, err
-}
-
-const getChatIdByWebId = `-- name: getChatIdByWebId :one
-SELECT id
-FROM chat_cfg
-WHERE web_id = ?
-`
-
-func (q *Queries) getChatIdByWebId(ctx context.Context, webID sql.NullInt64) (int64, error) {
-	row := q.queryRow(ctx, q.getChatIdByWebIdStmt, getChatIdByWebId, webID)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
 }
 
 const getChatStat = `-- name: getChatStat :one
@@ -270,11 +199,9 @@ func (q *Queries) getChatStat(ctx context.Context, chatID int64, statDate int64)
 const updateChatCfg = `-- name: updateChatCfg :exec
 UPDATE chat_cfg
 SET auto_cvt_bili=?,
-    auto_ocr=?,
     auto_calculate=?,
     auto_exchange=?,
     auto_check_adult=?,
-    save_messages=?,
     enable_coc=?,
     resp_nsfw_msg=?
 WHERE id = ?
@@ -282,11 +209,9 @@ WHERE id = ?
 
 type updateChatCfgParams struct {
 	AutoCvtBili    bool  `json:"auto_cvt_bili"`
-	AutoOcr        bool  `json:"auto_ocr"`
 	AutoCalculate  bool  `json:"auto_calculate"`
 	AutoExchange   bool  `json:"auto_exchange"`
 	AutoCheckAdult bool  `json:"auto_check_adult"`
-	SaveMessages   bool  `json:"save_messages"`
 	EnableCoc      bool  `json:"enable_coc"`
 	RespNsfwMsg    bool  `json:"resp_nsfw_msg"`
 	ID             int64 `json:"id"`
@@ -295,11 +220,9 @@ type updateChatCfgParams struct {
 func (q *Queries) updateChatCfg(ctx context.Context, arg updateChatCfgParams) error {
 	_, err := q.exec(ctx, q.updateChatCfgStmt, updateChatCfg,
 		arg.AutoCvtBili,
-		arg.AutoOcr,
 		arg.AutoCalculate,
 		arg.AutoExchange,
 		arg.AutoCheckAdult,
-		arg.SaveMessages,
 		arg.EnableCoc,
 		arg.RespNsfwMsg,
 		arg.ID,

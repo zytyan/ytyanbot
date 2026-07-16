@@ -13,6 +13,8 @@ type Definition struct {
 	Offline bool
 }
 
+const AIV2Version int64 = 3
+
 const AIMetadataBaselineSource = `
 ai metadata baseline v1
 - create ai_chat_models, ai_session_meta, and ai_message_meta when absent
@@ -38,12 +40,21 @@ generic ai database v3
 - requires the offline ai-db-migrate tool
 `
 
+const MainSchemaCleanupV4Source = `
+main schema cleanup v4
+- compact users around Telegram user_id and remove retired profile/timezone columns
+- rebuild chat_cfg without web search, automatic OCR, or message archive switches
+- drop retired chat_attr and chat_topics tables
+- preserve all user identities, names, chat settings, and active business data
+`
+
 var AIV2OfflineSource = aiV2OfflineDescription + "\n" + aischema.V2
 
 var All = []Definition{
 	{Version: 1, Name: "ai_metadata_baseline", Source: AIMetadataBaselineSource},
 	{Version: 2, Name: "remove_legacy_ai_memory", Source: RemoveLegacyAIMemorySource},
 	{Version: 3, Name: "generic_ai_v2", Source: AIV2OfflineSource, Offline: true},
+	{Version: 4, Name: "main_schema_cleanup", Source: MainSchemaCleanupV4Source, Offline: true},
 }
 
 func Checksum(source string) string {

@@ -89,6 +89,13 @@ var migrations = []Migration{
 		Offline: true,
 		Run:     func(context.Context, *sql.Tx) error { return nil },
 	},
+	{
+		Version: 4,
+		Name:    "main_schema_cleanup",
+		Source:  migrationdefs.MainSchemaCleanupV4Source,
+		Offline: true,
+		Run:     migrateMainSchemaCleanup,
+	},
 }
 
 func All() []Migration {
@@ -274,5 +281,47 @@ SET prompt=replace(prompt, '%MEMORIES%', '') WHERE instr(prompt, '%MEMORIES%') >
 		}
 	}
 	_, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS gemini_memories`)
+	return err
+}
+
+func migrateMainSchemaCleanup(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `
+CREATE TABLE users_v4
+(
+    user_id    INTEGER      NOT NULL PRIMARY KEY,
+    updated_at INT_UNIX_SEC NOT NULL,
+    first_name TEXT         NOT NULL,
+    last_name  TEXT,
+    username   TEXT
+) WITHOUT ROWID;
+
+INSERT INTO users_v4(user_id, updated_at, first_name, last_name, username)
+SELECT user_id, updated_at, first_name, last_name, username FROM users;
+DROP TABLE users;
+ALTER TABLE users_v4 RENAME TO users;
+
+CREATE TABLE chat_cfg_v4
+(
+    id               INTEGER PRIMARY KEY NOT NULL,
+    auto_cvt_bili    INT_BOOL            NOT NULL CHECK (auto_cvt_bili IN (0, 1)),
+    auto_calculate   INT_BOOL            NOT NULL CHECK (auto_calculate IN (0, 1)),
+    auto_exchange    INT_BOOL            NOT NULL CHECK (auto_exchange IN (0, 1)),
+    auto_check_adult INT_BOOL            NOT NULL CHECK (auto_check_adult IN (0, 1)),
+    enable_coc       INT_BOOL            NOT NULL CHECK (enable_coc IN (0, 1)),
+    resp_nsfw_msg    INT_BOOL            NOT NULL CHECK (resp_nsfw_msg IN (0, 1)),
+    timezone         INTEGER             NOT NULL CHECK (timezone < 86400 AND timezone > -86400)
+);
+
+INSERT INTO chat_cfg_v4(id, auto_cvt_bili, auto_calculate, auto_exchange,
+                        auto_check_adult, enable_coc, resp_nsfw_msg, timezone)
+SELECT id, auto_cvt_bili, auto_calculate, auto_exchange,
+       auto_check_adult, enable_coc, resp_nsfw_msg, timezone
+FROM chat_cfg;
+DROP TABLE chat_cfg;
+ALTER TABLE chat_cfg_v4 RENAME TO chat_cfg;
+
+DROP TABLE IF EXISTS chat_attr;
+DROP TABLE IF EXISTS chat_topics;
+`)
 	return err
 }

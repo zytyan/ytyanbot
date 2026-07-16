@@ -5,25 +5,17 @@ SELECT *
 FROM chat_cfg
 WHERE id = ?;
 
--- name: getChatIdByWebId :one
-SELECT id
-FROM chat_cfg
-WHERE web_id = ?;
-
 -- name: CreateChatCfg :exec
-INSERT INTO chat_cfg (id, web_id, auto_cvt_bili, auto_ocr, auto_calculate, auto_exchange, auto_check_adult,
-                      save_messages, enable_coc, resp_nsfw_msg, timezone)
-VALUES (?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?);
+INSERT INTO chat_cfg (id, auto_cvt_bili, auto_calculate, auto_exchange, auto_check_adult,
+                      enable_coc, resp_nsfw_msg, timezone)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: updateChatCfg :exec
 UPDATE chat_cfg
 SET auto_cvt_bili=?,
-    auto_ocr=?,
     auto_calculate=?,
     auto_exchange=?,
     auto_check_adult=?,
-    save_messages=?,
     enable_coc=?,
     resp_nsfw_msg=?
 WHERE id = ?;
@@ -59,19 +51,3 @@ SELECT *
 FROM chat_stat_daily
 WHERE chat_stat_daily.chat_id = ?
   AND chat_stat_daily.stat_date = ?;
-
--- name: createOrUpdateChatAttr :exec
-INSERT INTO chat_attr (id, type, title, username, first_name, last_name, is_forum)
-VALUES (?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT DO UPDATE SET type=excluded.type,
-                          title=excluded.title,
-                          username=excluded.username,
-                          first_name=excluded.first_name,
-                          last_name=excluded.last_name,
-                          is_forum=excluded.is_forum
-;
-
--- name: UpdateChatTopicName :exec
-INSERT INTO chat_topics (chat_id, thread_id, name)
-VALUES (?, ?, ?)
-ON CONFLICT DO UPDATE SET name=excluded.name;

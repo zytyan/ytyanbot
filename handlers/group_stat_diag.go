@@ -39,7 +39,7 @@ func GetRank(bot *gotgbot.Bot, ctx *ext.Context) error {
 		}
 		user, err := g.Q.GetUserById(context.Background(), v.user)
 		if err != nil {
-			res = append(res, "不知道是谁")
+			res = append(res, fmt.Sprintf("用户%d: %d", v.user, v.count))
 			continue
 		}
 		res = append(res, fmt.Sprintf("%s: %d", user.Name(), v.count))

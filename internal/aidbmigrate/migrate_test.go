@@ -159,7 +159,7 @@ SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)`, table).Scan(&exists
 		}
 	}
 	var migrationCount int
-	if err = database.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil || migrationCount != len(migrationdefs.All) {
+	if err = database.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationCount); err != nil || migrationCount != int(migrationdefs.AIV2Version) {
 		t.Fatalf("migration history mismatch: count=%d err=%v", migrationCount, err)
 	}
 	hashes, err := queries.ListReferencedMediaHashes(ctx)

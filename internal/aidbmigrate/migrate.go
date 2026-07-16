@@ -536,6 +536,9 @@ func migrateStaging(ctx context.Context, database *sql.DB, store *aimedia.Store,
 		}
 	}
 	for _, definition := range migrationdefs.All {
+		if definition.Version > migrationdefs.AIV2Version {
+			break
+		}
 		if err = target.RecordSchemaMigration(ctx, definition.Version, definition.Name,
 			migrationdefs.Checksum(definition.Source), migrationTime); err != nil {
 			return err

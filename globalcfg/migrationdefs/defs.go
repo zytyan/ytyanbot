@@ -3,7 +3,7 @@ package migrationdefs
 import (
 	"crypto/sha256"
 	"fmt"
-	aischema "main/sql"
+	legacyschema "main/sql/migrate"
 )
 
 type Definition struct {
@@ -82,7 +82,7 @@ picture rating constraints v9
 - preserve every valid picture, rating, aggregate, random key, and counter row exactly
 `
 
-var AIV2OfflineSource = aiV2OfflineDescription + "\n" + aischema.V2
+var AIV2OfflineSource = aiV2OfflineDescription + "\n" + legacyschema.V2V3
 
 var All = []Definition{
 	{Version: 1, Name: "ai_metadata_baseline", Source: AIMetadataBaselineSource},

@@ -1,11 +1,12 @@
 package g
 
 import (
+	"context"
 	"database/sql"
 	"main/globalcfg/migrationdefs"
+	aischema "main/sql"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 func mustGetProjectRootDir() string {
@@ -27,31 +28,14 @@ func mustGetProjectRootDir() string {
 }
 
 func initMainDatabaseInMemory(database *sql.DB) {
-	projRoot := mustGetProjectRootDir()
-	sqlDir := filepath.Join(projRoot, "sql")
-	dir, err := os.ReadDir(sqlDir)
-	if err != nil {
-		panic(err)
-	}
-	for _, file := range dir {
-		if file.IsDir() {
-			continue
-		}
-		name := file.Name()
-		if !strings.HasSuffix(name, ".sql") || !strings.HasPrefix(name, "schema_") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(sqlDir, name))
-		if err != nil {
-			panic(err)
-		}
-		_, err = database.Exec(string(data))
+	for _, schema := range aischema.Canonical() {
+		_, err := database.ExecContext(context.Background(), schema)
 		if err != nil {
 			panic(err)
 		}
 	}
 	for _, definition := range migrationdefs.All {
-		_, err = database.Exec(`INSERT INTO schema_migrations(version, name, checksum, applied_at)
+		_, err := database.Exec(`INSERT INTO schema_migrations(version, name, checksum, applied_at)
 VALUES (?, ?, ?, unixepoch())`, definition.Version, definition.Name,
 			migrationdefs.Checksum(definition.Source))
 		if err != nil {

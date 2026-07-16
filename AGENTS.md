@@ -8,7 +8,9 @@ These instructions apply to the whole repository.
 - Add or change business SQL through sqlc. The project uses `/usr/local/bin/sqlc` v1.31.1.
 - Run `sqlc generate` after every schema or query change. Never edit generated sqlc files by hand.
 - Versioned DDL, connection PRAGMAs, SQLite Backup API operations, `VACUUM INTO`, and integrity checks are infrastructure exceptions; keep them in the migration or operations layer, not in handlers or business logic.
-- Register main-database migrations in `globalcfg/migrations.go` with a strictly increasing version, stable source checksum, and transactional runner. Mark large rewrites as offline so normal startup refuses to apply them.
+- Register main-database migration definitions in `globalcfg/migrationdefs` and their transactional runners in `internal/mainmigrations`, with a strictly increasing version and stable source checksum. Mark large rewrites as offline so normal startup refuses to apply them.
+- Main-database migration runners live in `internal/mainmigrations`; `globalcfg/migrations.go` is only the runtime adapter. Use `cmd/db-init` for a new canonical database and `cmd/main-db-migrate` for post-V2 offline rewrites. Never initialize or rewrite a production database in place.
+- `sql.Canonical()` is the explicit fresh-database schema list. Migration-only legacy schemas belong under `sql/migrate/`; do not restore glob-based `schema_*.sql` loading.
 - Configure SQLite connection-wide behavior through the DSN or a connection hook so every pooled connection enables foreign keys and the same timeout/journal settings.
 - A SQL change is accepted only after a second `sqlc generate` is idempotent, targeted tests pass, `go test ./...` passes, and the project builds completely.
 

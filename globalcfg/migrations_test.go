@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"main/internal/mainmigrations"
 	"path/filepath"
 	"testing"
 
@@ -20,58 +21,58 @@ func openMigrationTestDB(t *testing.T) *sql.DB {
 
 func TestDatabaseMigrationsAreIdempotentAndChecksummed(t *testing.T) {
 	database := openMigrationTestDB(t)
-	migrations := []databaseMigration{{
-		version: 1,
-		name:    "create_example",
-		source:  "CREATE TABLE example(id INTEGER PRIMARY KEY)",
-		run: func(ctx context.Context, tx *sql.Tx) error {
+	migrations := []mainmigrations.Migration{{
+		Version: 1,
+		Name:    "create_example",
+		Source:  "CREATE TABLE example(id INTEGER PRIMARY KEY)",
+		Run: func(ctx context.Context, tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, `CREATE TABLE example(id INTEGER PRIMARY KEY)`)
 			return err
 		},
 	}}
-	require.NoError(t, applyDatabaseMigrations(context.Background(), database, migrations))
-	require.NoError(t, applyDatabaseMigrations(context.Background(), database, migrations))
+	require.NoError(t, mainmigrations.Apply(context.Background(), database, migrations, false))
+	require.NoError(t, mainmigrations.Apply(context.Background(), database, migrations, false))
 
 	var count int
 	require.NoError(t, database.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&count))
 	require.Equal(t, 1, count)
 
-	changed := append([]databaseMigration(nil), migrations...)
-	changed[0].source += " -- changed"
-	err := applyDatabaseMigrations(context.Background(), database, changed)
+	changed := append([]mainmigrations.Migration(nil), migrations...)
+	changed[0].Source += " -- changed"
+	err := mainmigrations.Apply(context.Background(), database, changed, false)
 	require.ErrorContains(t, err, "checksum mismatch")
 }
 
 func TestDatabaseMigrationRollbackAndOfflineGate(t *testing.T) {
 	database := openMigrationTestDB(t)
-	failing := []databaseMigration{{
-		version: 1,
-		name:    "rollback_example",
-		source:  "rollback example",
-		run: func(ctx context.Context, tx *sql.Tx) error {
+	failing := []mainmigrations.Migration{{
+		Version: 1,
+		Name:    "rollback_example",
+		Source:  "rollback example",
+		Run: func(ctx context.Context, tx *sql.Tx) error {
 			if _, err := tx.ExecContext(ctx, `CREATE TABLE rolled_back(id INTEGER)`); err != nil {
 				return err
 			}
 			return errors.New("stop")
 		},
 	}}
-	require.ErrorContains(t, applyDatabaseMigrations(context.Background(), database, failing), "stop")
+	require.ErrorContains(t, mainmigrations.Apply(context.Background(), database, failing, false), "stop")
 	var exists bool
 	require.NoError(t, database.QueryRow(`SELECT EXISTS(
 SELECT 1 FROM sqlite_master WHERE type='table' AND name='rolled_back')`).Scan(&exists))
 	require.False(t, exists)
 
-	offline := []databaseMigration{{
-		version: 1, name: "offline", source: "offline", offline: true,
-		run: func(context.Context, *sql.Tx) error { return nil },
+	offline := []mainmigrations.Migration{{
+		Version: 1, Name: "offline", Source: "offline", Offline: true,
+		Run: func(context.Context, *sql.Tx) error { return nil },
 	}}
-	require.ErrorContains(t, applyDatabaseMigrations(context.Background(), database, offline),
+	require.ErrorContains(t, mainmigrations.Apply(context.Background(), database, offline, false),
 		"requires the offline migration tool")
 }
 
 func TestMainDatabaseV3RequiresOfflineMigrationTool(t *testing.T) {
 	database := openMigrationTestDB(t)
-	err := applyDatabaseMigrations(context.Background(), database, mainDatabaseMigrations[2:])
+	err := mainmigrations.Apply(context.Background(), database, mainmigrations.All()[2:], false)
 	require.ErrorContains(t, err, "generic_ai_v2")
 	require.ErrorContains(t, err, "requires the offline migration tool")
 }

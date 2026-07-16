@@ -51,10 +51,10 @@ INSERT INTO yt_dl_results
 (url, audio_only, resolution, file_id, title, description, uploader, upload_count)
 VALUES (?, ?, ?, ?, ?, ?, ?, 1)
 ON CONFLICT DO UPDATE
-    SET file_id=file_id,
-        title=title,
-        description=description,
-        uploader=uploader
+    SET file_id=excluded.file_id,
+        title=excluded.title,
+        description=excluded.description,
+        uploader=excluded.uploader
 `
 
 type UpdateYtDlpCacheParams struct {

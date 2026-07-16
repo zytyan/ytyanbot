@@ -62,6 +62,12 @@ ai message session lookup v6
 - support reverse message-to-session lookup without indexing unused run status queries
 `
 
+const YTDLCacheLookupV7Source = `
+youtube download cache lookup v7
+- index yt_dl_results by file_id for upload counter updates
+- runtime upsert refreshes Telegram file and descriptive metadata from excluded values
+`
+
 var AIV2OfflineSource = aiV2OfflineDescription + "\n" + aischema.V2
 
 var All = []Definition{
@@ -71,6 +77,7 @@ var All = []Definition{
 	{Version: 4, Name: "main_schema_cleanup", Source: MainSchemaCleanupV4Source, Offline: true},
 	{Version: 5, Name: "normalize_chat_stats", Source: NormalizeChatStatsV5Source, Offline: true},
 	{Version: 6, Name: "ai_message_session_lookup", Source: AIMessageSessionLookupV6Source},
+	{Version: 7, Name: "ytdl_cache_lookup", Source: YTDLCacheLookupV7Source},
 }
 
 func Checksum(source string) string {

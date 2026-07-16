@@ -29,7 +29,7 @@ CREATE TABLE ai_session_messages(
 			definition.Version, definition.Name, migrationdefs.Checksum(definition.Source))
 		require.NoError(t, err)
 	}
-	require.NoError(t, ApplyRuntime(context.Background(), database))
+	require.NoError(t, Apply(context.Background(), database, All()[:6], false))
 
 	var exists bool
 	require.NoError(t, database.QueryRow(`SELECT EXISTS(

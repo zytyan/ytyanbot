@@ -113,6 +113,15 @@ ON ai_session_messages(chat_id, msg_id, context_only)`)
 			return err
 		},
 	},
+	{
+		Version: 7,
+		Name:    "ytdl_cache_lookup",
+		Source:  migrationdefs.YTDLCacheLookupV7Source,
+		Run: func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, `CREATE INDEX idx_yt_dl_results_file_id ON yt_dl_results(file_id)`)
+			return err
+		},
+	},
 }
 
 func All() []Migration {

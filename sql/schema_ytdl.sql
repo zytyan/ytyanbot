@@ -12,3 +12,5 @@ CREATE TABLE IF NOT EXISTS yt_dl_results
     upload_count INTEGER  NOT NULL DEFAULT 0,
     PRIMARY KEY (url, audio_only, resolution)
 ) WITHOUT ROWID;
+
+CREATE INDEX idx_yt_dl_results_file_id ON yt_dl_results(file_id);

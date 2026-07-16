@@ -18,6 +18,7 @@ These instructions apply to the whole repository.
 - Main schema V7 indexes `yt_dl_results(file_id)`; cache refreshes must update file and descriptive metadata from `excluded` values without resetting the existing upload counter.
 - Main schema V8 timestamps Bilibili inline contexts. They remain valid for 30 days, are cleaned daily, and expired callbacks must return an explicit user-facing message.
 - Main schema V9 is an offline picture-rating rebuild. Abort and report values outside `bot_rate=-1..7` or `rating=0..7`; never repair them implicitly. Valid ratings reference pictures with `ON DELETE CASCADE`.
+- Final main-database validation rejects every retired AI/message/chat table and every V4/V5 retired column before an offline migration output may be published.
 - Configure SQLite connection-wide behavior through the DSN or a connection hook so every pooled connection enables foreign keys and the same timeout/journal settings.
 - A SQL change is accepted only after a second `sqlc generate` is idempotent, targeted tests pass, `go test ./...` passes, and the project builds completely.
 

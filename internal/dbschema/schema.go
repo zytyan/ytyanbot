@@ -62,7 +62,8 @@ func Validate(ctx context.Context, database *sql.DB) error {
 	legacy := []string{
 		"gemini_sessions", "gemini_contents", "gemini_system_prompt", "gemini_memories",
 		"gemini_messages", "gemini_session_migrations", "ai_chat_models", "ai_session_meta",
-		"ai_message_meta",
+		"ai_message_meta", "chat_attr", "chat_topics", "saved_msgs", "raw_update", "edit_history",
+		"meili_wal",
 	}
 	for _, name := range legacy {
 		var exists bool
@@ -72,6 +73,23 @@ SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)`, name).Scan(&exists)
 		}
 		if exists {
 			return fmt.Errorf("retired table remains: %s", name)
+		}
+	}
+	retiredColumns := map[string][]string{
+		"chat_cfg":        {"web_id", "auto_ocr", "save_messages"},
+		"users":           {"id", "profile_update_at", "profile_photo", "timezone"},
+		"chat_stat_daily": {"user_msg_stat", "msg_count_by_time", "msg_id_at_time_start"},
+	}
+	for table, columns := range retiredColumns {
+		for _, column := range columns {
+			var exists bool
+			if err = database.QueryRowContext(ctx, `SELECT EXISTS(
+SELECT 1 FROM pragma_table_info(?) WHERE name=?)`, table, column).Scan(&exists); err != nil {
+				return err
+			}
+			if exists {
+				return fmt.Errorf("retired column remains: %s.%s", table, column)
+			}
 		}
 	}
 	return nil

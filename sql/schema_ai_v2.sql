@@ -88,6 +88,9 @@ CREATE TABLE ai_session_messages
     FOREIGN KEY (chat_id, msg_id) REFERENCES ai_messages (chat_id, msg_id) ON DELETE RESTRICT
 ) WITHOUT ROWID, STRICT;
 
+CREATE INDEX idx_ai_session_messages_chat_msg_context
+    ON ai_session_messages (chat_id, msg_id, context_only);
+
 CREATE TABLE ai_runs
 (
     id                         INTEGER PRIMARY KEY AUTOINCREMENT,

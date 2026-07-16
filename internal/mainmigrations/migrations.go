@@ -103,6 +103,16 @@ var migrations = []Migration{
 		Offline: true,
 		Run:     migrateNormalizeChatStats,
 	},
+	{
+		Version: 6,
+		Name:    "ai_message_session_lookup",
+		Source:  migrationdefs.AIMessageSessionLookupV6Source,
+		Run: func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, `CREATE INDEX idx_ai_session_messages_chat_msg_context
+ON ai_session_messages(chat_id, msg_id, context_only)`)
+			return err
+		},
+	},
 }
 
 func All() []Migration {

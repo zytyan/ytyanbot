@@ -62,7 +62,7 @@ CREATE TABLE chat_stat_daily(
 	require.NoError(t, err)
 
 	require.ErrorContains(t, ApplyRuntime(context.Background(), database), "requires the offline migration tool")
-	require.NoError(t, ApplyOffline(context.Background(), database))
+	require.NoError(t, Apply(context.Background(), database, All()[:5], true))
 
 	var messageCount, photoCount int64
 	require.NoError(t, database.QueryRow(`SELECT message_count,photo_count FROM chat_stat_daily WHERE chat_id=-100 AND stat_date=20000`).

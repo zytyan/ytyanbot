@@ -56,6 +56,12 @@ normalize chat statistics v5
 - validate every decoded user and bucket value before dropping legacy Blob columns
 `
 
+const AIMessageSessionLookupV6Source = `
+ai message session lookup v6
+- index ai_session_messages by chat_id, msg_id, and context_only
+- support reverse message-to-session lookup without indexing unused run status queries
+`
+
 var AIV2OfflineSource = aiV2OfflineDescription + "\n" + aischema.V2
 
 var All = []Definition{
@@ -64,6 +70,7 @@ var All = []Definition{
 	{Version: 3, Name: "generic_ai_v2", Source: AIV2OfflineSource, Offline: true},
 	{Version: 4, Name: "main_schema_cleanup", Source: MainSchemaCleanupV4Source, Offline: true},
 	{Version: 5, Name: "normalize_chat_stats", Source: NormalizeChatStatsV5Source, Offline: true},
+	{Version: 6, Name: "ai_message_session_lookup", Source: AIMessageSessionLookupV6Source},
 }
 
 func Checksum(source string) string {

@@ -202,6 +202,7 @@ func main() {
 	b := newBot(token)
 	hdrs.SetMainBot(b)
 	hdrs.StartChatStatScheduler()
+	hdrs.StartBiliInlineCleanup()
 	go hdrs.HttpListen4019()
 	dp := GroupedDispatcher{Dispatcher: ext.NewDispatcher(&ext.DispatcherOpts{
 		Error: func(b *gotgbot.Bot, ctx *ext.Context, err error) ext.DispatcherAction {

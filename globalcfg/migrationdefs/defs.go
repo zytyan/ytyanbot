@@ -68,6 +68,12 @@ youtube download cache lookup v7
 - runtime upsert refreshes Telegram file and descriptive metadata from excluded values
 `
 
+const BiliInlineRetentionV8Source = `
+bilibili inline retention v8
+- add created_at and backfill every legacy inline context to migration time
+- index created_at for thirty-day expiry reads and daily cleanup
+`
+
 var AIV2OfflineSource = aiV2OfflineDescription + "\n" + aischema.V2
 
 var All = []Definition{
@@ -78,6 +84,7 @@ var All = []Definition{
 	{Version: 5, Name: "normalize_chat_stats", Source: NormalizeChatStatsV5Source, Offline: true},
 	{Version: 6, Name: "ai_message_session_lookup", Source: AIMessageSessionLookupV6Source},
 	{Version: 7, Name: "ytdl_cache_lookup", Source: YTDLCacheLookupV7Source},
+	{Version: 8, Name: "bili_inline_retention", Source: BiliInlineRetentionV8Source},
 }
 
 func Checksum(source string) string {

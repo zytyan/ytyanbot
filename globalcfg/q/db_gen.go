@@ -33,6 +33,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.delCocCharAttrStmt, err = db.PrepareContext(ctx, delCocCharAttr); err != nil {
 		return nil, fmt.Errorf("error preparing query DelCocCharAttr: %w", err)
 	}
+	if q.deleteExpiredBiliInlineDataStmt, err = db.PrepareContext(ctx, deleteExpiredBiliInlineData); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteExpiredBiliInlineData: %w", err)
+	}
 	if q.getBiliInlineDataStmt, err = db.PrepareContext(ctx, getBiliInlineData); err != nil {
 		return nil, fmt.Errorf("error preparing query GetBiliInlineData: %w", err)
 	}
@@ -144,6 +147,11 @@ func (q *Queries) Close() error {
 	if q.delCocCharAttrStmt != nil {
 		if cerr := q.delCocCharAttrStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing delCocCharAttrStmt: %w", cerr)
+		}
+	}
+	if q.deleteExpiredBiliInlineDataStmt != nil {
+		if cerr := q.deleteExpiredBiliInlineDataStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteExpiredBiliInlineDataStmt: %w", cerr)
 		}
 	}
 	if q.getBiliInlineDataStmt != nil {
@@ -343,6 +351,7 @@ type Queries struct {
 	createBiliInlineDataStmt          *sql.Stmt
 	createChatCfgStmt                 *sql.Stmt
 	delCocCharAttrStmt                *sql.Stmt
+	deleteExpiredBiliInlineDataStmt   *sql.Stmt
 	getBiliInlineDataStmt             *sql.Stmt
 	getCocCharAllAttrStmt             *sql.Stmt
 	getCocCharAttrStmt                *sql.Stmt
@@ -383,6 +392,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		createBiliInlineDataStmt:          q.createBiliInlineDataStmt,
 		createChatCfgStmt:                 q.createChatCfgStmt,
 		delCocCharAttrStmt:                q.delCocCharAttrStmt,
+		deleteExpiredBiliInlineDataStmt:   q.deleteExpiredBiliInlineDataStmt,
 		getBiliInlineDataStmt:             q.getBiliInlineDataStmt,
 		getCocCharAllAttrStmt:             q.getCocCharAllAttrStmt,
 		getCocCharAttrStmt:                q.getCocCharAttrStmt,

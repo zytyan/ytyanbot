@@ -115,7 +115,7 @@ func BiliMsgConverterInline(bot *gotgbot.Bot, ctx *ext.Context) (err error) {
 		return err
 	}
 
-	uid, err := g.Q.CreateBiliInlineData(context.Background())
+	uid, err := g.Q.CreateBiliInlineData(context.Background(), q.UnixTime{Time: time.Now()})
 	if err != nil {
 		logD.Warn("insert to bilibili error", "err", err)
 		return err

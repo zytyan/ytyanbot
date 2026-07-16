@@ -349,8 +349,13 @@ func DownloadInlinedBv(bot *gotgbot.Bot, ctx *ext.Context) error {
 		answer("没有找到视频链接", true)
 		return err
 	}
-	inlineData, err := g.Q.GetBiliInlineData(context.Background(), uid)
+	inlineData, err := g.Q.GetBiliInlineData(context.Background(), uid,
+		q.UnixTime{Time: time.Now().Add(-biliInlineTTL)})
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			answer("下载上下文已过期，请重新发送 inline 消息", true)
+			return nil
+		}
 		answer("没有找到视频链接，可能是数据库错误", true)
 		return err
 	}

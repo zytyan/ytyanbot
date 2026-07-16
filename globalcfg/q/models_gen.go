@@ -9,10 +9,11 @@ import (
 )
 
 type BiliInlineResult struct {
-	Uid    int64  `json:"uid"`
-	Text   string `json:"text"`
-	ChatID int64  `json:"chat_id"`
-	MsgID  int64  `json:"msg_id"`
+	Uid       int64    `json:"uid"`
+	Text      string   `json:"text"`
+	ChatID    int64    `json:"chat_id"`
+	MsgID     int64    `json:"msg_id"`
+	CreatedAt UnixTime `json:"created_at"`
 }
 
 type CharacterAttr struct {

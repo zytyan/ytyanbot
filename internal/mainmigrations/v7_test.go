@@ -30,7 +30,7 @@ CREATE TABLE yt_dl_results(
 			definition.Version, definition.Name, migrationdefs.Checksum(definition.Source))
 		require.NoError(t, err)
 	}
-	require.NoError(t, ApplyRuntime(context.Background(), database))
+	require.NoError(t, Apply(context.Background(), database, All()[:7], false))
 
 	rows, err := database.Query(`EXPLAIN QUERY PLAN UPDATE yt_dl_results SET upload_count=upload_count+1 WHERE file_id=?`, "file")
 	require.NoError(t, err)

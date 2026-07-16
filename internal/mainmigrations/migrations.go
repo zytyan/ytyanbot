@@ -122,6 +122,18 @@ ON ai_session_messages(chat_id, msg_id, context_only)`)
 			return err
 		},
 	},
+	{
+		Version: 8,
+		Name:    "bili_inline_retention",
+		Source:  migrationdefs.BiliInlineRetentionV8Source,
+		Run: func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, `
+ALTER TABLE bili_inline_results ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;
+UPDATE bili_inline_results SET created_at=unixepoch();
+CREATE INDEX idx_bili_inline_results_created_at ON bili_inline_results(created_at);`)
+			return err
+		},
+	},
 }
 
 func All() []Migration {

@@ -10,17 +10,29 @@ import (
 )
 
 const createBiliInlineData = `-- name: CreateBiliInlineData :one
-INSERT INTO bili_inline_results
-    DEFAULT
-VALUES
+INSERT INTO bili_inline_results(created_at)
+VALUES (?)
 RETURNING uid
 `
 
-func (q *Queries) CreateBiliInlineData(ctx context.Context) (int64, error) {
-	row := q.queryRow(ctx, q.createBiliInlineDataStmt, createBiliInlineData)
+func (q *Queries) CreateBiliInlineData(ctx context.Context, createdAt UnixTime) (int64, error) {
+	row := q.queryRow(ctx, q.createBiliInlineDataStmt, createBiliInlineData, createdAt)
 	var uid int64
 	err := row.Scan(&uid)
 	return uid, err
+}
+
+const deleteExpiredBiliInlineData = `-- name: DeleteExpiredBiliInlineData :execrows
+DELETE FROM bili_inline_results
+WHERE created_at < ?
+`
+
+func (q *Queries) DeleteExpiredBiliInlineData(ctx context.Context, createdAt UnixTime) (int64, error) {
+	result, err := q.exec(ctx, q.deleteExpiredBiliInlineDataStmt, deleteExpiredBiliInlineData, createdAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const getBiliInlineData = `-- name: GetBiliInlineData :one
@@ -28,6 +40,7 @@ const getBiliInlineData = `-- name: GetBiliInlineData :one
 SELECT text, chat_id, msg_id
 FROM bili_inline_results
 WHERE uid = ?
+  AND created_at >= ?
 `
 
 type GetBiliInlineDataRow struct {
@@ -37,8 +50,8 @@ type GetBiliInlineDataRow struct {
 }
 
 // encoding: utf-8
-func (q *Queries) GetBiliInlineData(ctx context.Context, uid int64) (GetBiliInlineDataRow, error) {
-	row := q.queryRow(ctx, q.getBiliInlineDataStmt, getBiliInlineData, uid)
+func (q *Queries) GetBiliInlineData(ctx context.Context, uid int64, createdAt UnixTime) (GetBiliInlineDataRow, error) {
+	row := q.queryRow(ctx, q.getBiliInlineDataStmt, getBiliInlineData, uid, createdAt)
 	var i GetBiliInlineDataRow
 	err := row.Scan(&i.Text, &i.ChatID, &i.MsgID)
 	return i, err

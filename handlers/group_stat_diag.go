@@ -14,7 +14,12 @@ import (
 
 func GetRank(bot *gotgbot.Bot, ctx *ext.Context) error {
 	stat := g.Q.ChatStatAt(ctx.EffectiveChat.Id, time.Now().Unix())
-	if stat == nil || len(stat.UserMsgStat) == 0 {
+	if stat == nil {
+		_, err := bot.SendMessage(ctx.EffectiveChat.Id, "没有数据", nil)
+		return err
+	}
+	snapshot := stat.Snapshot()
+	if len(snapshot.UserMsgStat) == 0 {
 		_, err := bot.SendMessage(ctx.EffectiveChat.Id, "没有数据", nil)
 		return err
 	}
@@ -22,8 +27,8 @@ func GetRank(bot *gotgbot.Bot, ctx *ext.Context) error {
 		user  int64
 		count int64
 	}
-	tmp := make([]userCount, 0, len(stat.UserMsgStat))
-	for u, c := range stat.UserMsgStat {
+	tmp := make([]userCount, 0, len(snapshot.UserMsgStat))
+	for u, c := range snapshot.UserMsgStat {
 		if c == nil {
 			continue
 		}

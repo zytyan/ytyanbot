@@ -67,14 +67,6 @@ sql:
           go_type:
             type: "NullString"
             import: "database/sql"
-        - db_type: "BLOB_USER_TO_CNT"
-          engine: "sqlite"
-          go_type:
-            type: UserMsgStatMap
-        - db_type: "BLOB_TEN_MINUTE_STAT"
-          engine: "sqlite"
-          go_type:
-            type: TenMinuteStats
   - engine: "sqlite"
     queries:
       - "sql/query_ai_v2.sql"

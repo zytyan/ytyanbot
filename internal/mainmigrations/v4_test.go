@@ -40,7 +40,7 @@ INSERT INTO chat_topics VALUES(-100,1,'topic');`)
 		require.NoError(t, err)
 	}
 	require.ErrorContains(t, ApplyRuntime(context.Background(), database), "requires the offline migration tool")
-	require.NoError(t, ApplyOffline(context.Background(), database))
+	require.NoError(t, Apply(context.Background(), database, All()[:4], true))
 
 	var userID, updatedAt int64
 	var firstName, lastName, username string

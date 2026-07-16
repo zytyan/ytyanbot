@@ -143,6 +143,7 @@ npm run dev
 - 下线旧消息搜索前，先生成 Meilisearch dump，再用 `cmd/legacy-message-archive` 一致性归档消息库、WAL 和 dump；命令要求全新输出目录并记录行数、完整性和 SHA-256。
 - 普通启动只执行小型在线迁移；存在未应用的 offline migration 时会拒绝启动。
 - 主库 V4 会离线压缩用户维表并删除退役群资料/消息搜索配置；必须通过 `cmd/main-db-migrate` 生成新库，不能由服务启动隐式执行。
+- 主库 V5 会离线解码群统计 Gob 数据：每日标量保留在 `chat_stat_daily`，用户统计和 144 个十分钟桶分别迁入结构化子表，并在逐项校验通过后移除旧 BLOB 列。
 
 如果修改了 SQL schema 或 query，需要同步更新/重新生成对应 sqlc 产物，并补充相关测试。
 

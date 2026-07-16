@@ -19,7 +19,7 @@ var (
 	statJob       *gocron.Job
 )
 
-func mostActiveUsers(stat *q.ChatStatDaily) (users []int64, counts []int64) {
+func mostActiveUsers(stat *q.ChatStatSnapshot) (users []int64, counts []int64) {
 	if stat == nil || len(stat.UserMsgStat) == 0 {
 		return
 	}
@@ -44,7 +44,7 @@ func mostActiveUsers(stat *q.ChatStatDaily) (users []int64, counts []int64) {
 	return
 }
 
-func mostActiveTimeSeg(stat *q.ChatStatDaily) (timeId int, timeSeg string, count int64) {
+func mostActiveTimeSeg(stat *q.ChatStatSnapshot) (timeId int, timeSeg string, count int64) {
 	if stat == nil {
 		return
 	}
@@ -65,7 +65,7 @@ func statDateString(timezone int64) string {
 	return time.Now().In(loc).Format("2006年01月02日")
 }
 
-func formatStatMessage(chatId int64, stat *q.ChatStatDaily, timezone int64) string {
+func formatStatMessage(chatId int64, stat *q.ChatStatSnapshot, timezone int64) string {
 	if stat == nil {
 		return "没有数据"
 	}

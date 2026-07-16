@@ -96,6 +96,13 @@ var migrations = []Migration{
 		Offline: true,
 		Run:     migrateMainSchemaCleanup,
 	},
+	{
+		Version: 5,
+		Name:    "normalize_chat_stats",
+		Source:  migrationdefs.NormalizeChatStatsV5Source,
+		Offline: true,
+		Run:     migrateNormalizeChatStats,
+	},
 }
 
 func All() []Migration {

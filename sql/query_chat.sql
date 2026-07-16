@@ -39,10 +39,7 @@ SET message_count        = ?,
     download_video_count = ?,
     download_audio_count = ?,
     dio_add_user_count   = ?,
-    dio_ban_user_count   = ?,
-    user_msg_stat        = ?,
-    msg_count_by_time    = ?,
-    msg_id_at_time_start = ?
+    dio_ban_user_count   = ?
 WHERE chat_id = ?
   AND stat_date = ?;
 
@@ -51,3 +48,29 @@ SELECT *
 FROM chat_stat_daily
 WHERE chat_stat_daily.chat_id = ?
   AND chat_stat_daily.stat_date = ?;
+
+-- name: ListChatStatUsers :many
+SELECT user_id, message_count, message_length
+FROM chat_stat_user_daily
+WHERE chat_id=? AND stat_date=?
+ORDER BY user_id;
+
+-- name: UpsertChatStatUser :exec
+INSERT INTO chat_stat_user_daily(chat_id, stat_date, user_id, message_count, message_length)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(chat_id, stat_date, user_id) DO UPDATE SET
+    message_count=excluded.message_count,
+    message_length=excluded.message_length;
+
+-- name: ListChatStatBuckets :many
+SELECT bucket, message_count, first_msg_id
+FROM chat_stat_bucket_daily
+WHERE chat_id=? AND stat_date=?
+ORDER BY bucket;
+
+-- name: UpsertChatStatBucket :exec
+INSERT INTO chat_stat_bucket_daily(chat_id, stat_date, bucket, message_count, first_msg_id)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(chat_id, stat_date, bucket) DO UPDATE SET
+    message_count=excluded.message_count,
+    first_msg_id=excluded.first_msg_id;

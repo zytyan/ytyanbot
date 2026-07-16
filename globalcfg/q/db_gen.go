@@ -54,6 +54,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.incYtDlUploadCountStmt, err = db.PrepareContext(ctx, incYtDlUploadCount); err != nil {
 		return nil, fmt.Errorf("error preparing query IncYtDlUploadCount: %w", err)
 	}
+	if q.listChatStatBucketsStmt, err = db.PrepareContext(ctx, listChatStatBuckets); err != nil {
+		return nil, fmt.Errorf("error preparing query ListChatStatBuckets: %w", err)
+	}
+	if q.listChatStatUsersStmt, err = db.PrepareContext(ctx, listChatStatUsers); err != nil {
+		return nil, fmt.Errorf("error preparing query ListChatStatUsers: %w", err)
+	}
 	if q.listNsfwPicUserRatesByFileUidStmt, err = db.PrepareContext(ctx, listNsfwPicUserRatesByFileUid); err != nil {
 		return nil, fmt.Errorf("error preparing query ListNsfwPicUserRatesByFileUid: %w", err)
 	}
@@ -71,6 +77,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.updateYtDlpCacheStmt, err = db.PrepareContext(ctx, updateYtDlpCache); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateYtDlpCache: %w", err)
+	}
+	if q.upsertChatStatBucketStmt, err = db.PrepareContext(ctx, upsertChatStatBucket); err != nil {
+		return nil, fmt.Errorf("error preparing query UpsertChatStatBucket: %w", err)
+	}
+	if q.upsertChatStatUserStmt, err = db.PrepareContext(ctx, upsertChatStatUser); err != nil {
+		return nil, fmt.Errorf("error preparing query UpsertChatStatUser: %w", err)
 	}
 	if q.createChatStatDailyStmt, err = db.PrepareContext(ctx, createChatStatDaily); err != nil {
 		return nil, fmt.Errorf("error preparing query createChatStatDaily: %w", err)
@@ -169,6 +181,16 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing incYtDlUploadCountStmt: %w", cerr)
 		}
 	}
+	if q.listChatStatBucketsStmt != nil {
+		if cerr := q.listChatStatBucketsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listChatStatBucketsStmt: %w", cerr)
+		}
+	}
+	if q.listChatStatUsersStmt != nil {
+		if cerr := q.listChatStatUsersStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listChatStatUsersStmt: %w", cerr)
+		}
+	}
 	if q.listNsfwPicUserRatesByFileUidStmt != nil {
 		if cerr := q.listNsfwPicUserRatesByFileUidStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listNsfwPicUserRatesByFileUidStmt: %w", cerr)
@@ -197,6 +219,16 @@ func (q *Queries) Close() error {
 	if q.updateYtDlpCacheStmt != nil {
 		if cerr := q.updateYtDlpCacheStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing updateYtDlpCacheStmt: %w", cerr)
+		}
+	}
+	if q.upsertChatStatBucketStmt != nil {
+		if cerr := q.upsertChatStatBucketStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing upsertChatStatBucketStmt: %w", cerr)
+		}
+	}
+	if q.upsertChatStatUserStmt != nil {
+		if cerr := q.upsertChatStatUserStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing upsertChatStatUserStmt: %w", cerr)
 		}
 	}
 	if q.createChatStatDailyStmt != nil {
@@ -318,12 +350,16 @@ type Queries struct {
 	getPrprCacheStmt                  *sql.Stmt
 	getYtDlpDbCacheStmt               *sql.Stmt
 	incYtDlUploadCountStmt            *sql.Stmt
+	listChatStatBucketsStmt           *sql.Stmt
+	listChatStatUsersStmt             *sql.Stmt
 	listNsfwPicUserRatesByFileUidStmt *sql.Stmt
 	setCocCharAttrStmt                *sql.Stmt
 	setPrprCacheStmt                  *sql.Stmt
 	updateBiliInlineMsgIdStmt         *sql.Stmt
 	updateChatStatDailyStmt           *sql.Stmt
 	updateYtDlpCacheStmt              *sql.Stmt
+	upsertChatStatBucketStmt          *sql.Stmt
+	upsertChatStatUserStmt            *sql.Stmt
 	createChatStatDailyStmt           *sql.Stmt
 	createNewUserStmt                 *sql.Stmt
 	createNsfwPicUserRateStmt         *sql.Stmt
@@ -354,12 +390,16 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getPrprCacheStmt:                  q.getPrprCacheStmt,
 		getYtDlpDbCacheStmt:               q.getYtDlpDbCacheStmt,
 		incYtDlUploadCountStmt:            q.incYtDlUploadCountStmt,
+		listChatStatBucketsStmt:           q.listChatStatBucketsStmt,
+		listChatStatUsersStmt:             q.listChatStatUsersStmt,
 		listNsfwPicUserRatesByFileUidStmt: q.listNsfwPicUserRatesByFileUidStmt,
 		setCocCharAttrStmt:                q.setCocCharAttrStmt,
 		setPrprCacheStmt:                  q.setPrprCacheStmt,
 		updateBiliInlineMsgIdStmt:         q.updateBiliInlineMsgIdStmt,
 		updateChatStatDailyStmt:           q.updateChatStatDailyStmt,
 		updateYtDlpCacheStmt:              q.updateYtDlpCacheStmt,
+		upsertChatStatBucketStmt:          q.upsertChatStatBucketStmt,
+		upsertChatStatUserStmt:            q.upsertChatStatUserStmt,
 		createChatStatDailyStmt:           q.createChatStatDailyStmt,
 		createNewUserStmt:                 q.createNewUserStmt,
 		createNsfwPicUserRateStmt:         q.createNsfwPicUserRateStmt,

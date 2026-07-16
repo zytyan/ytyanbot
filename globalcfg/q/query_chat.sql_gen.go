@@ -40,6 +40,78 @@ func (q *Queries) CreateChatCfg(ctx context.Context, arg CreateChatCfgParams) er
 	return err
 }
 
+const listChatStatBuckets = `-- name: ListChatStatBuckets :many
+SELECT bucket, message_count, first_msg_id
+FROM chat_stat_bucket_daily
+WHERE chat_id=? AND stat_date=?
+ORDER BY bucket
+`
+
+type ListChatStatBucketsRow struct {
+	Bucket       int64 `json:"bucket"`
+	MessageCount int64 `json:"message_count"`
+	FirstMsgID   int64 `json:"first_msg_id"`
+}
+
+func (q *Queries) ListChatStatBuckets(ctx context.Context, chatID int64, statDate int64) ([]ListChatStatBucketsRow, error) {
+	rows, err := q.query(ctx, q.listChatStatBucketsStmt, listChatStatBuckets, chatID, statDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListChatStatBucketsRow
+	for rows.Next() {
+		var i ListChatStatBucketsRow
+		if err := rows.Scan(&i.Bucket, &i.MessageCount, &i.FirstMsgID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChatStatUsers = `-- name: ListChatStatUsers :many
+SELECT user_id, message_count, message_length
+FROM chat_stat_user_daily
+WHERE chat_id=? AND stat_date=?
+ORDER BY user_id
+`
+
+type ListChatStatUsersRow struct {
+	UserID        int64 `json:"user_id"`
+	MessageCount  int64 `json:"message_count"`
+	MessageLength int64 `json:"message_length"`
+}
+
+func (q *Queries) ListChatStatUsers(ctx context.Context, chatID int64, statDate int64) ([]ListChatStatUsersRow, error) {
+	rows, err := q.query(ctx, q.listChatStatUsersStmt, listChatStatUsers, chatID, statDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListChatStatUsersRow
+	for rows.Next() {
+		var i ListChatStatUsersRow
+		if err := rows.Scan(&i.UserID, &i.MessageCount, &i.MessageLength); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateChatStatDaily = `-- name: UpdateChatStatDaily :exec
 UPDATE chat_stat_daily
 SET message_count        = ?,
@@ -54,33 +126,27 @@ SET message_count        = ?,
     download_video_count = ?,
     download_audio_count = ?,
     dio_add_user_count   = ?,
-    dio_ban_user_count   = ?,
-    user_msg_stat        = ?,
-    msg_count_by_time    = ?,
-    msg_id_at_time_start = ?
+    dio_ban_user_count   = ?
 WHERE chat_id = ?
   AND stat_date = ?
 `
 
 type UpdateChatStatDailyParams struct {
-	MessageCount       int64          `json:"message_count"`
-	PhotoCount         int64          `json:"photo_count"`
-	VideoCount         int64          `json:"video_count"`
-	StickerCount       int64          `json:"sticker_count"`
-	ForwardCount       int64          `json:"forward_count"`
-	MarsCount          int64          `json:"mars_count"`
-	MaxMarsCount       int64          `json:"max_mars_count"`
-	RacyCount          int64          `json:"racy_count"`
-	AdultCount         int64          `json:"adult_count"`
-	DownloadVideoCount int64          `json:"download_video_count"`
-	DownloadAudioCount int64          `json:"download_audio_count"`
-	DioAddUserCount    int64          `json:"dio_add_user_count"`
-	DioBanUserCount    int64          `json:"dio_ban_user_count"`
-	UserMsgStat        UserMsgStatMap `json:"user_msg_stat"`
-	MsgCountByTime     TenMinuteStats `json:"msg_count_by_time"`
-	MsgIDAtTimeStart   TenMinuteStats `json:"msg_id_at_time_start"`
-	ChatID             int64          `json:"chat_id"`
-	StatDate           int64          `json:"stat_date"`
+	MessageCount       int64 `json:"message_count"`
+	PhotoCount         int64 `json:"photo_count"`
+	VideoCount         int64 `json:"video_count"`
+	StickerCount       int64 `json:"sticker_count"`
+	ForwardCount       int64 `json:"forward_count"`
+	MarsCount          int64 `json:"mars_count"`
+	MaxMarsCount       int64 `json:"max_mars_count"`
+	RacyCount          int64 `json:"racy_count"`
+	AdultCount         int64 `json:"adult_count"`
+	DownloadVideoCount int64 `json:"download_video_count"`
+	DownloadAudioCount int64 `json:"download_audio_count"`
+	DioAddUserCount    int64 `json:"dio_add_user_count"`
+	DioBanUserCount    int64 `json:"dio_ban_user_count"`
+	ChatID             int64 `json:"chat_id"`
+	StatDate           int64 `json:"stat_date"`
 }
 
 func (q *Queries) UpdateChatStatDaily(ctx context.Context, arg UpdateChatStatDailyParams) error {
@@ -98,11 +164,62 @@ func (q *Queries) UpdateChatStatDaily(ctx context.Context, arg UpdateChatStatDai
 		arg.DownloadAudioCount,
 		arg.DioAddUserCount,
 		arg.DioBanUserCount,
-		arg.UserMsgStat,
-		arg.MsgCountByTime,
-		arg.MsgIDAtTimeStart,
 		arg.ChatID,
 		arg.StatDate,
+	)
+	return err
+}
+
+const upsertChatStatBucket = `-- name: UpsertChatStatBucket :exec
+INSERT INTO chat_stat_bucket_daily(chat_id, stat_date, bucket, message_count, first_msg_id)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(chat_id, stat_date, bucket) DO UPDATE SET
+    message_count=excluded.message_count,
+    first_msg_id=excluded.first_msg_id
+`
+
+type UpsertChatStatBucketParams struct {
+	ChatID       int64 `json:"chat_id"`
+	StatDate     int64 `json:"stat_date"`
+	Bucket       int64 `json:"bucket"`
+	MessageCount int64 `json:"message_count"`
+	FirstMsgID   int64 `json:"first_msg_id"`
+}
+
+func (q *Queries) UpsertChatStatBucket(ctx context.Context, arg UpsertChatStatBucketParams) error {
+	_, err := q.exec(ctx, q.upsertChatStatBucketStmt, upsertChatStatBucket,
+		arg.ChatID,
+		arg.StatDate,
+		arg.Bucket,
+		arg.MessageCount,
+		arg.FirstMsgID,
+	)
+	return err
+}
+
+const upsertChatStatUser = `-- name: UpsertChatStatUser :exec
+INSERT INTO chat_stat_user_daily(chat_id, stat_date, user_id, message_count, message_length)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(chat_id, stat_date, user_id) DO UPDATE SET
+    message_count=excluded.message_count,
+    message_length=excluded.message_length
+`
+
+type UpsertChatStatUserParams struct {
+	ChatID        int64 `json:"chat_id"`
+	StatDate      int64 `json:"stat_date"`
+	UserID        int64 `json:"user_id"`
+	MessageCount  int64 `json:"message_count"`
+	MessageLength int64 `json:"message_length"`
+}
+
+func (q *Queries) UpsertChatStatUser(ctx context.Context, arg UpsertChatStatUserParams) error {
+	_, err := q.exec(ctx, q.upsertChatStatUserStmt, upsertChatStatUser,
+		arg.ChatID,
+		arg.StatDate,
+		arg.UserID,
+		arg.MessageCount,
+		arg.MessageLength,
 	)
 	return err
 }
@@ -110,7 +227,7 @@ func (q *Queries) UpdateChatStatDaily(ctx context.Context, arg UpdateChatStatDai
 const createChatStatDaily = `-- name: createChatStatDaily :one
 INSERT INTO chat_stat_daily (chat_id, stat_date)
 VALUES (?, ?)
-RETURNING chat_id, stat_date, message_count, photo_count, video_count, sticker_count, forward_count, mars_count, max_mars_count, racy_count, adult_count, download_video_count, download_audio_count, dio_add_user_count, dio_ban_user_count, user_msg_stat, msg_count_by_time, msg_id_at_time_start
+RETURNING chat_id, stat_date, message_count, photo_count, video_count, sticker_count, forward_count, mars_count, max_mars_count, racy_count, adult_count, download_video_count, download_audio_count, dio_add_user_count, dio_ban_user_count
 `
 
 func (q *Queries) createChatStatDaily(ctx context.Context, chatID int64, statDate int64) (ChatStatDaily, error) {
@@ -132,9 +249,6 @@ func (q *Queries) createChatStatDaily(ctx context.Context, chatID int64, statDat
 		&i.DownloadAudioCount,
 		&i.DioAddUserCount,
 		&i.DioBanUserCount,
-		&i.UserMsgStat,
-		&i.MsgCountByTime,
-		&i.MsgIDAtTimeStart,
 	)
 	return i, err
 }
@@ -164,7 +278,7 @@ func (q *Queries) getChatCfgById(ctx context.Context, id int64) (chatCfg, error)
 }
 
 const getChatStat = `-- name: getChatStat :one
-SELECT chat_id, stat_date, message_count, photo_count, video_count, sticker_count, forward_count, mars_count, max_mars_count, racy_count, adult_count, download_video_count, download_audio_count, dio_add_user_count, dio_ban_user_count, user_msg_stat, msg_count_by_time, msg_id_at_time_start
+SELECT chat_id, stat_date, message_count, photo_count, video_count, sticker_count, forward_count, mars_count, max_mars_count, racy_count, adult_count, download_video_count, download_audio_count, dio_add_user_count, dio_ban_user_count
 FROM chat_stat_daily
 WHERE chat_stat_daily.chat_id = ?
   AND chat_stat_daily.stat_date = ?
@@ -189,9 +303,6 @@ func (q *Queries) getChatStat(ctx context.Context, chatID int64, statDate int64)
 		&i.DownloadAudioCount,
 		&i.DioAddUserCount,
 		&i.DioBanUserCount,
-		&i.UserMsgStat,
-		&i.MsgCountByTime,
-		&i.MsgIDAtTimeStart,
 	)
 	return i, err
 }

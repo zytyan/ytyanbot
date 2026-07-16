@@ -48,6 +48,14 @@ main schema cleanup v4
 - preserve all user identities, names, chat settings, and active business data
 `
 
+const NormalizeChatStatsV5Source = `
+normalize chat statistics v5
+- preserve scalar daily counters in chat_stat_daily
+- migrate every legacy per-user Gob entry into chat_stat_user_daily
+- migrate all 144 message-count and first-message buckets into chat_stat_bucket_daily
+- validate every decoded user and bucket value before dropping legacy Blob columns
+`
+
 var AIV2OfflineSource = aiV2OfflineDescription + "\n" + aischema.V2
 
 var All = []Definition{
@@ -55,6 +63,7 @@ var All = []Definition{
 	{Version: 2, Name: "remove_legacy_ai_memory", Source: RemoveLegacyAIMemorySource},
 	{Version: 3, Name: "generic_ai_v2", Source: AIV2OfflineSource, Offline: true},
 	{Version: 4, Name: "main_schema_cleanup", Source: MainSchemaCleanupV4Source, Offline: true},
+	{Version: 5, Name: "normalize_chat_stats", Source: NormalizeChatStatsV5Source, Offline: true},
 }
 
 func Checksum(source string) string {

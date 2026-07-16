@@ -33,10 +33,27 @@ CREATE TABLE chat_stat_daily
     dio_add_user_count   INTEGER              NOT NULL DEFAULT 0,
     dio_ban_user_count   INTEGER              NOT NULL DEFAULT 0,
 
-    -- serialized MessagePack
-    user_msg_stat        BLOB_USER_TO_CNT     NOT NULL DEFAULT x'',
-    msg_count_by_time    BLOB_TEN_MINUTE_STAT NOT NULL DEFAULT x'',
-    msg_id_at_time_start BLOB_TEN_MINUTE_STAT NOT NULL DEFAULT x'',
-
     PRIMARY KEY (chat_id, stat_date)
 ) WITHOUT ROWID;
+
+CREATE TABLE chat_stat_user_daily
+(
+    chat_id        INTEGER NOT NULL,
+    stat_date      INTEGER NOT NULL,
+    user_id        INTEGER NOT NULL,
+    message_count  INTEGER NOT NULL CHECK (message_count >= 0),
+    message_length INTEGER NOT NULL CHECK (message_length >= 0),
+    PRIMARY KEY (chat_id, stat_date, user_id),
+    FOREIGN KEY (chat_id, stat_date) REFERENCES chat_stat_daily(chat_id, stat_date) ON DELETE CASCADE
+) WITHOUT ROWID, STRICT;
+
+CREATE TABLE chat_stat_bucket_daily
+(
+    chat_id       INTEGER NOT NULL,
+    stat_date     INTEGER NOT NULL,
+    bucket        INTEGER NOT NULL CHECK (bucket BETWEEN 0 AND 143),
+    message_count INTEGER NOT NULL CHECK (message_count >= 0),
+    first_msg_id  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (chat_id, stat_date, bucket),
+    FOREIGN KEY (chat_id, stat_date) REFERENCES chat_stat_daily(chat_id, stat_date) ON DELETE CASCADE
+) WITHOUT ROWID, STRICT;

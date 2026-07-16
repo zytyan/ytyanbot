@@ -17,6 +17,7 @@ These instructions apply to the whole repository.
 - Main schema V6 indexes `ai_session_messages(chat_id, msg_id, context_only)` for reverse session lookup. Do not add standalone status indexes without a real query consumer.
 - Main schema V7 indexes `yt_dl_results(file_id)`; cache refreshes must update file and descriptive metadata from `excluded` values without resetting the existing upload counter.
 - Main schema V8 timestamps Bilibili inline contexts. They remain valid for 30 days, are cleaned daily, and expired callbacks must return an explicit user-facing message.
+- Main schema V9 is an offline picture-rating rebuild. Abort and report values outside `bot_rate=-1..7` or `rating=0..7`; never repair them implicitly. Valid ratings reference pictures with `ON DELETE CASCADE`.
 - Configure SQLite connection-wide behavior through the DSN or a connection hook so every pooled connection enables foreign keys and the same timeout/journal settings.
 - A SQL change is accepted only after a second `sqlc generate` is idempotent, targeted tests pass, `go test ./...` passes, and the project builds completely.
 

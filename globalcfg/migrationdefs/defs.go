@@ -74,6 +74,14 @@ bilibili inline retention v8
 - index created_at for thirty-day expiry reads and daily cleanup
 `
 
+const PictureRatingConstraintsV9Source = `
+picture rating constraints v9
+- reject and report bot_rate values outside minus one through seven
+- reject and report user rating values outside zero through seven
+- rebuild picture rating tables with range checks and cascading rating deletion
+- preserve every valid picture, rating, aggregate, random key, and counter row exactly
+`
+
 var AIV2OfflineSource = aiV2OfflineDescription + "\n" + aischema.V2
 
 var All = []Definition{
@@ -85,6 +93,7 @@ var All = []Definition{
 	{Version: 6, Name: "ai_message_session_lookup", Source: AIMessageSessionLookupV6Source},
 	{Version: 7, Name: "ytdl_cache_lookup", Source: YTDLCacheLookupV7Source},
 	{Version: 8, Name: "bili_inline_retention", Source: BiliInlineRetentionV8Source},
+	{Version: 9, Name: "picture_rating_constraints", Source: PictureRatingConstraintsV9Source, Offline: true},
 }
 
 func Checksum(source string) string {

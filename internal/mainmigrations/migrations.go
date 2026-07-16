@@ -134,6 +134,13 @@ CREATE INDEX idx_bili_inline_results_created_at ON bili_inline_results(created_a
 			return err
 		},
 	},
+	{
+		Version: 9,
+		Name:    "picture_rating_constraints",
+		Source:  migrationdefs.PictureRatingConstraintsV9Source,
+		Offline: true,
+		Run:     migratePictureRatingConstraints,
+	},
 }
 
 func All() []Migration {

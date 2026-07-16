@@ -4,7 +4,7 @@ CREATE TABLE saved_pics
 (
     file_uid        TEXT    NOT NULL,
     file_id         TEXT    NOT NULL, -- 插入时，若 file_uid 相同，则更新 file_id
-    bot_rate        INTEGER NOT NULL, -- 目前为 [-1,7] 的整数，-1 时相当于删除
+    bot_rate        INTEGER NOT NULL CHECK (bot_rate BETWEEN -1 AND 7), -- -1 时相当于删除
     rand_key        INTEGER NOT NULL,
     -- user_rate 为生成列：有评分时为平均分；否则回退到 bot_rate
     user_rate       INTEGER NOT NULL GENERATED ALWAYS AS (
@@ -26,9 +26,9 @@ CREATE TABLE IF NOT EXISTS saved_pics_rating
 (
     file_uid TEXT    NOT NULL,
     user_id  INTEGER NOT NULL,
-    rating   INTEGER NOT NULL DEFAULT 0,
+    rating   INTEGER NOT NULL DEFAULT 0 CHECK (rating BETWEEN 0 AND 7),
     PRIMARY KEY (file_uid, user_id),
-    FOREIGN KEY (file_uid) REFERENCES saved_pics (file_uid)
+    FOREIGN KEY (file_uid) REFERENCES saved_pics (file_uid) ON DELETE CASCADE
 ) WITHOUT ROWID, STRICT;
 
 

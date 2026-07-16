@@ -29,7 +29,7 @@ INSERT INTO bili_inline_results(text,chat_id,msg_id) VALUES('legacy',-100,42);`)
 		require.NoError(t, err)
 	}
 	before := timeNowUnix(t, database)
-	require.NoError(t, ApplyRuntime(context.Background(), database))
+	require.NoError(t, Apply(context.Background(), database, All()[:8], false))
 	after := timeNowUnix(t, database)
 
 	var createdAt int64

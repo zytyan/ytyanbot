@@ -16,6 +16,7 @@ func main() {
 	flag.StringVar(&cfg.MessageDB, "message-db", "", "live legacy message SQLite database")
 	flag.StringVar(&cfg.WALDB, "wal-db", "", "live Meilisearch WAL SQLite database")
 	flag.StringVar(&cfg.MeiliDump, "meili-dump", "", "completed Meilisearch dump file")
+	flag.StringVar(&cfg.MeiliDumpUnavailableReason, "meili-dump-unavailable-reason", "", "explicit reason no Meilisearch dump exists")
 	flag.StringVar(&cfg.OutputDir, "output-dir", "", "new archive directory (must not exist)")
 	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -141,6 +141,7 @@ npm run dev
 - `go run ./cmd/db-init -output <new.db>` 只用于创建不存在的 canonical 空库。
 - AI V1 到 V2 使用 `cmd/ai-db-migrate`；已经完成 V2 的数据库后续离线重写使用 `cmd/main-db-migrate`。两个迁移命令都只读源库并要求输出路径不存在。
 - 下线旧消息搜索前，先生成 Meilisearch dump，再用 `cmd/legacy-message-archive` 一致性归档消息库、WAL 和 dump；命令要求全新输出目录并记录行数、完整性和 SHA-256。
+- 若已确认 Meilisearch 服务、数据目录和历史 dump 均不存在，可显式使用 `-meili-dump-unavailable-reason` 将原因写入 Manifest；不得用空文件伪装 dump。
 - 普通启动只执行小型在线迁移；存在未应用的 offline migration 时会拒绝启动。
 - 主库 V4 会离线压缩用户维表并删除退役群资料/消息搜索配置；必须通过 `cmd/main-db-migrate` 生成新库，不能由服务启动隐式执行。
 - 主库 V5 会离线解码群统计 Gob 数据：每日标量保留在 `chat_stat_daily`，用户统计和 144 个十分钟桶分别迁入结构化子表，并在逐项校验通过后移除旧 BLOB 列。

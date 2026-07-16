@@ -18,21 +18,24 @@ import (
 )
 
 type Config struct {
-	MessageDB string
-	WALDB     string
-	MeiliDump string
-	OutputDir string
+	MessageDB                  string
+	WALDB                      string
+	MeiliDump                  string
+	MeiliDumpUnavailableReason string
+	OutputDir                  string
 }
 
 type Artifact struct {
-	Name            string           `json:"name"`
-	SourcePath      string           `json:"source_path"`
-	ArchivePath     string           `json:"archive_path"`
-	SourceSHA256    string           `json:"source_sha256"`
-	ArchiveSHA256   string           `json:"archive_sha256"`
-	SourceUnchanged bool             `json:"source_unchanged"`
-	IntegrityCheck  string           `json:"integrity_check,omitempty"`
-	TableCounts     map[string]int64 `json:"table_counts,omitempty"`
+	Name              string           `json:"name"`
+	Status            string           `json:"status"`
+	UnavailableReason string           `json:"unavailable_reason,omitempty"`
+	SourcePath        string           `json:"source_path"`
+	ArchivePath       string           `json:"archive_path"`
+	SourceSHA256      string           `json:"source_sha256"`
+	ArchiveSHA256     string           `json:"archive_sha256"`
+	SourceUnchanged   bool             `json:"source_unchanged"`
+	IntegrityCheck    string           `json:"integrity_check,omitempty"`
+	TableCounts       map[string]int64 `json:"table_counts,omitempty"`
 }
 
 type Manifest struct {
@@ -73,11 +76,17 @@ func Run(ctx context.Context, cfg Config) (manifest Manifest, err error) {
 		return manifest, err
 	}
 	manifest.Artifacts = append(manifest.Artifacts, walArtifact)
-	dumpArtifact, err := archiveFile("meili-dump", cfg.MeiliDump, filepath.Join(cfg.OutputDir, filepath.Base(cfg.MeiliDump)))
-	if err != nil {
-		return manifest, err
+	if cfg.MeiliDumpUnavailableReason != "" {
+		manifest.Artifacts = append(manifest.Artifacts, Artifact{
+			Name: "meili-dump", Status: "unavailable", UnavailableReason: cfg.MeiliDumpUnavailableReason,
+		})
+	} else {
+		dumpArtifact, err := archiveFile("meili-dump", cfg.MeiliDump, filepath.Join(cfg.OutputDir, filepath.Base(cfg.MeiliDump)))
+		if err != nil {
+			return manifest, err
+		}
+		manifest.Artifacts = append(manifest.Artifacts, dumpArtifact)
 	}
-	manifest.Artifacts = append(manifest.Artifacts, dumpArtifact)
 	manifest.CompletedAt = time.Now().UTC()
 	data, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -92,10 +101,16 @@ func Run(ctx context.Context, cfg Config) (manifest Manifest, err error) {
 }
 
 func normalize(cfg Config) (Config, error) {
-	if cfg.MessageDB == "" || cfg.WALDB == "" || cfg.MeiliDump == "" || cfg.OutputDir == "" {
-		return cfg, errors.New("message-db, wal-db, meili-dump, and output-dir are required")
+	if cfg.MessageDB == "" || cfg.WALDB == "" || cfg.OutputDir == "" {
+		return cfg, errors.New("message-db, wal-db, and output-dir are required")
 	}
-	values := []*string{&cfg.MessageDB, &cfg.WALDB, &cfg.MeiliDump, &cfg.OutputDir}
+	if (cfg.MeiliDump == "") == (cfg.MeiliDumpUnavailableReason == "") {
+		return cfg, errors.New("exactly one of meili-dump or meili-dump-unavailable-reason is required")
+	}
+	values := []*string{&cfg.MessageDB, &cfg.WALDB, &cfg.OutputDir}
+	if cfg.MeiliDump != "" {
+		values = append(values, &cfg.MeiliDump)
+	}
 	for _, value := range values {
 		absolute, err := filepath.Abs(*value)
 		if err != nil {
@@ -107,7 +122,7 @@ func normalize(cfg Config) (Config, error) {
 }
 
 func archiveSQLite(ctx context.Context, name, sourcePath, outputPath string, tables []string) (Artifact, error) {
-	artifact := Artifact{Name: name, SourcePath: sourcePath, ArchivePath: outputPath}
+	artifact := Artifact{Name: name, Status: "available", SourcePath: sourcePath, ArchivePath: outputPath}
 	var err error
 	artifact.SourceSHA256, err = fileSHA256(sourcePath)
 	if err != nil {
@@ -172,7 +187,7 @@ SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)`, table).Scan(&exists
 }
 
 func archiveFile(name, sourcePath, outputPath string) (Artifact, error) {
-	artifact := Artifact{Name: name, SourcePath: sourcePath, ArchivePath: outputPath}
+	artifact := Artifact{Name: name, Status: "available", SourcePath: sourcePath, ArchivePath: outputPath}
 	var err error
 	artifact.SourceSHA256, err = fileSHA256(sourcePath)
 	if err != nil {

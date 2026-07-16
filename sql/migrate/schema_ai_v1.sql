@@ -8,6 +8,31 @@ CREATE TABLE gemini_sessions (
     total_output_tokens INTEGER NOT NULL
 );
 
+CREATE TABLE gemini_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL REFERENCES gemini_sessions(id) ON DELETE CASCADE,
+    chat_id INTEGER NOT NULL,
+    tg_message_id INTEGER NOT NULL,
+    from_id INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    reply_to_seq INTEGER,
+    created_at INTEGER NOT NULL,
+    UNIQUE(chat_id, tg_message_id),
+    UNIQUE(session_id, seq)
+);
+
+CREATE TABLE gemini_session_migrations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    old_session_id INTEGER NOT NULL REFERENCES gemini_sessions(id),
+    new_session_id INTEGER NOT NULL REFERENCES gemini_sessions(id),
+    migrated_msg_ids TEXT NOT NULL,
+    reason TEXT,
+    requested_by TEXT,
+    created_at INTEGER NOT NULL
+);
+
 CREATE TABLE gemini_contents (
     session_id INTEGER NOT NULL,
     chat_id INTEGER NOT NULL,

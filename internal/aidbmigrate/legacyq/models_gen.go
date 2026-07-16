@@ -64,6 +64,19 @@ type GeminiContent struct {
 	UserID           int64          `json:"user_id"`
 }
 
+type GeminiMessage struct {
+	ID          int64         `json:"id"`
+	SessionID   int64         `json:"session_id"`
+	ChatID      int64         `json:"chat_id"`
+	TgMessageID int64         `json:"tg_message_id"`
+	FromID      int64         `json:"from_id"`
+	Role        string        `json:"role"`
+	Content     string        `json:"content"`
+	Seq         int64         `json:"seq"`
+	ReplyToSeq  sql.NullInt64 `json:"reply_to_seq"`
+	CreatedAt   int64         `json:"created_at"`
+}
+
 type GeminiSession struct {
 	ID                int64  `json:"id"`
 	ChatID            int64  `json:"chat_id"`
@@ -72,6 +85,16 @@ type GeminiSession struct {
 	Frozen            int64  `json:"frozen"`
 	TotalInputTokens  int64  `json:"total_input_tokens"`
 	TotalOutputTokens int64  `json:"total_output_tokens"`
+}
+
+type GeminiSessionMigration struct {
+	ID             int64          `json:"id"`
+	OldSessionID   int64          `json:"old_session_id"`
+	NewSessionID   int64          `json:"new_session_id"`
+	MigratedMsgIds string         `json:"migrated_msg_ids"`
+	Reason         sql.NullString `json:"reason"`
+	RequestedBy    sql.NullString `json:"requested_by"`
+	CreatedAt      int64          `json:"created_at"`
 }
 
 type GeminiSystemPrompt struct {

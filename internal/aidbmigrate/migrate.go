@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -276,6 +277,28 @@ func migrateStaging(ctx context.Context, database *sql.DB, store *aimedia.Store,
 	if err != nil {
 		return fmt.Errorf("read legacy messages: %w", err)
 	}
+	v0Messages, err := legacy.ListLegacyV0Messages(ctx)
+	if err != nil {
+		return fmt.Errorf("read legacy v0 messages: %w", err)
+	}
+	for _, message := range v0Messages {
+		messages = append(messages, legacyq.ListLegacyMessagesRow{
+			SessionID: message.SessionID, ChatID: message.ChatID, MsgID: message.MsgID,
+			Role: message.Role, SentTime: message.SentTime, MsgType: "text",
+			ReplyToMsgID: message.ReplyToMsgID,
+			Text:         sql.NullString{String: message.Text, Valid: true},
+			UserID:       message.UserID,
+		})
+	}
+	sort.SliceStable(messages, func(left, right int) bool {
+		if messages[left].SessionID != messages[right].SessionID {
+			return messages[left].SessionID < messages[right].SessionID
+		}
+		if messages[left].SentTime != messages[right].SentTime {
+			return messages[left].SentTime < messages[right].SentTime
+		}
+		return messages[left].MsgID < messages[right].MsgID
+	})
 	prompts, err := legacy.ListLegacySystemPrompts(ctx)
 	if err != nil {
 		return fmt.Errorf("read legacy prompts: %w", err)
@@ -562,6 +585,8 @@ DROP TABLE IF EXISTS ai_session_meta;
 DROP TABLE IF EXISTS ai_chat_models;
 DROP TABLE IF EXISTS gemini_system_prompt;
 DROP TABLE IF EXISTS gemini_memories;
+DROP TABLE IF EXISTS gemini_session_migrations;
+DROP TABLE IF EXISTS gemini_messages;
 DROP TABLE IF EXISTS gemini_contents;
 DROP TABLE IF EXISTS gemini_sessions;`)
 	return err
@@ -603,7 +628,8 @@ func validateDatabase(ctx context.Context, databasePath string, store *aimedia.S
 	}
 	legacyNames := []string{
 		"gemini_sessions", "gemini_contents", "gemini_system_prompt", "gemini_memories",
-		"ai_chat_models", "ai_session_meta", "ai_message_meta",
+		"gemini_messages", "gemini_session_migrations", "ai_chat_models", "ai_session_meta",
+		"ai_message_meta",
 	}
 	for _, table := range legacyNames {
 		var exists bool

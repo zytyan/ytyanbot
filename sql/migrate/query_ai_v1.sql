@@ -15,7 +15,16 @@ SELECT s.id, s.chat_id, s.chat_name, s.chat_type, s.frozen,
        m.gemini_cache_token_count, m.gemini_cache_fingerprint,
        m.history_rebuild_lossy
 FROM gemini_sessions AS s
-LEFT JOIN gemini_contents AS c ON c.session_id=s.id
+LEFT JOIN (
+    SELECT session_id, sent_time FROM gemini_contents
+    UNION ALL
+    SELECT m.session_id, m.created_at
+    FROM gemini_messages AS m
+    WHERE NOT EXISTS (
+        SELECT 1 FROM gemini_contents AS c
+        WHERE c.chat_id=m.chat_id AND c.msg_id=m.tg_message_id
+    )
+) AS c ON c.session_id=s.id
 LEFT JOIN ai_session_meta AS m ON m.session_id=s.id
 GROUP BY s.id
 ORDER BY s.id;
@@ -33,6 +42,19 @@ FROM gemini_contents AS c
 LEFT JOIN ai_message_meta AS m
   ON m.session_id=c.session_id AND m.msg_id=c.msg_id
 ORDER BY c.session_id, c.sent_time, c.msg_id;
+
+-- name: ListLegacyV0Messages :many
+SELECT m.session_id, m.chat_id, m.tg_message_id AS msg_id, m.role,
+       m.created_at AS sent_time, r.tg_message_id AS reply_to_msg_id,
+       m.content AS text, m.from_id AS user_id
+FROM gemini_messages AS m
+LEFT JOIN gemini_messages AS r
+  ON r.session_id=m.session_id AND r.seq=m.reply_to_seq
+WHERE NOT EXISTS (
+    SELECT 1 FROM gemini_contents AS c
+    WHERE c.chat_id=m.chat_id AND c.msg_id=m.tg_message_id
+)
+ORDER BY m.session_id, m.created_at, m.tg_message_id;
 
 -- name: ListLegacySystemPrompts :many
 SELECT chat_id, thread_id, prompt

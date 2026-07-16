@@ -143,7 +143,16 @@ SELECT s.id, s.chat_id, s.chat_name, s.chat_type, s.frozen,
        m.gemini_cache_token_count, m.gemini_cache_fingerprint,
        m.history_rebuild_lossy
 FROM gemini_sessions AS s
-LEFT JOIN gemini_contents AS c ON c.session_id=s.id
+LEFT JOIN (
+    SELECT session_id, sent_time FROM gemini_contents
+    UNION ALL
+    SELECT m.session_id, m.created_at
+    FROM gemini_messages AS m
+    WHERE NOT EXISTS (
+        SELECT 1 FROM gemini_contents AS c
+        WHERE c.chat_id=m.chat_id AND c.msg_id=m.tg_message_id
+    )
+) AS c ON c.session_id=s.id
 LEFT JOIN ai_session_meta AS m ON m.session_id=s.id
 GROUP BY s.id
 ORDER BY s.id
@@ -234,6 +243,63 @@ func (q *Queries) ListLegacySystemPrompts(ctx context.Context) ([]GeminiSystemPr
 	for rows.Next() {
 		var i GeminiSystemPrompt
 		if err := rows.Scan(&i.ChatID, &i.ThreadID, &i.Prompt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLegacyV0Messages = `-- name: ListLegacyV0Messages :many
+SELECT m.session_id, m.chat_id, m.tg_message_id AS msg_id, m.role,
+       m.created_at AS sent_time, r.tg_message_id AS reply_to_msg_id,
+       m.content AS text, m.from_id AS user_id
+FROM gemini_messages AS m
+LEFT JOIN gemini_messages AS r
+  ON r.session_id=m.session_id AND r.seq=m.reply_to_seq
+WHERE NOT EXISTS (
+    SELECT 1 FROM gemini_contents AS c
+    WHERE c.chat_id=m.chat_id AND c.msg_id=m.tg_message_id
+)
+ORDER BY m.session_id, m.created_at, m.tg_message_id
+`
+
+type ListLegacyV0MessagesRow struct {
+	SessionID    int64         `json:"session_id"`
+	ChatID       int64         `json:"chat_id"`
+	MsgID        int64         `json:"msg_id"`
+	Role         string        `json:"role"`
+	SentTime     int64         `json:"sent_time"`
+	ReplyToMsgID sql.NullInt64 `json:"reply_to_msg_id"`
+	Text         string        `json:"text"`
+	UserID       int64         `json:"user_id"`
+}
+
+func (q *Queries) ListLegacyV0Messages(ctx context.Context) ([]ListLegacyV0MessagesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listLegacyV0Messages)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLegacyV0MessagesRow
+	for rows.Next() {
+		var i ListLegacyV0MessagesRow
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.ChatID,
+			&i.MsgID,
+			&i.Role,
+			&i.SentTime,
+			&i.ReplyToMsgID,
+			&i.Text,
+			&i.UserID,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

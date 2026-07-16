@@ -35,6 +35,11 @@ INSERT INTO gemini_memories(id, chat_id, topic_id, content) VALUES (1, -100, 0, 
 INSERT INTO gemini_sessions(id, chat_id, chat_name, chat_type, frozen, total_input_tokens, total_output_tokens)
 VALUES (10, -100, 'chat', 'supergroup', 0, 100, 20),
        (20, -200, 'empty', 'private', 1, 0, 0);
+INSERT INTO gemini_messages(session_id, chat_id, tg_message_id, from_id, role, content,
+  seq, reply_to_seq, created_at)
+VALUES (10, -100, 90, 7, 'user', 'v0 question', 1, NULL, 900),
+       (10, -100, 91, 999, 'model', 'v0 answer', 2, 1, 901),
+       (10, -100, 103, 999, 'model', 'overlap ignored', 3, 2, 1003);
 INSERT INTO ai_session_meta(session_id, provider, model, cached_input_tokens,
   gemini_interaction_id, window_start_msg_id, gemini_cache_name, gemini_cache_expire_time,
   gemini_cache_start_msg_id, gemini_cache_end_msg_id, gemini_cache_token_count,
@@ -89,10 +94,10 @@ func TestOfflineMigrationPreservesDataAndRemovesLegacyAI(t *testing.T) {
 		t.Fatalf("missing source/output checksums: %+v", manifest)
 	}
 	if manifest.Source.Sessions != 2 || manifest.Target.Sessions != 2 ||
-		manifest.Source.Messages != 4 || manifest.Target.Messages != 4 ||
-		manifest.Target.Runs != 2 || manifest.Target.MediaObjects != 1 ||
+		manifest.Source.Messages != 6 || manifest.Target.Messages != 6 ||
+		manifest.Target.Runs != 3 || manifest.Target.MediaObjects != 1 ||
 		manifest.Target.MediaReferences != 1 || manifest.Target.AssistantPayloads != 2 ||
-		manifest.UnknownTokenRuns != 1 {
+		manifest.UnknownTokenRuns != 2 {
 		t.Fatalf("unexpected counts: source=%+v target=%+v unknown=%d",
 			manifest.Source, manifest.Target, manifest.UnknownTokenRuns)
 	}
@@ -110,7 +115,7 @@ func TestOfflineMigrationPreservesDataAndRemovesLegacyAI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
-	if session.CreatedAt != 1000 || session.UpdatedAt != 1003 || session.TopicID.Valid {
+	if session.CreatedAt != 900 || session.UpdatedAt != 1003 || session.TopicID.Valid {
 		t.Fatalf("session time/topic migration mismatch: %+v", session)
 	}
 	emptySession, err := queries.GetAISession(ctx, 20)
@@ -145,7 +150,8 @@ func TestOfflineMigrationPreservesDataAndRemovesLegacyAI(t *testing.T) {
 		t.Fatalf("non-AI data not preserved: %q err=%v", nonAI, err)
 	}
 	for _, table := range []string{"gemini_sessions", "gemini_contents", "gemini_system_prompt",
-		"gemini_memories", "ai_chat_models", "ai_session_meta", "ai_message_meta"} {
+		"gemini_memories", "gemini_messages", "gemini_session_migrations",
+		"ai_chat_models", "ai_session_meta", "ai_message_meta"} {
 		var exists bool
 		if err = database.QueryRowContext(ctx, `SELECT EXISTS(
 SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)`, table).Scan(&exists); err != nil || exists {

@@ -6,7 +6,6 @@ import (
 	g "main/globalcfg"
 	hdrs "main/handlers"
 	"main/handlers/genbot"
-	"main/http/backend"
 	"net/http"
 	"os"
 	"os/signal"
@@ -203,7 +202,6 @@ func main() {
 	b := newBot(token)
 	hdrs.SetMainBot(b)
 	hdrs.StartChatStatScheduler()
-	backend.GoListenAndServe(g.GetConfig().BackendAddr, b)
 	go hdrs.HttpListen4019()
 	dp := GroupedDispatcher{Dispatcher: ext.NewDispatcher(&ext.DispatcherOpts{
 		Error: func(b *gotgbot.Bot, ctx *ext.Context, err error) ext.DispatcherAction {

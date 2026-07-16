@@ -16,26 +16,15 @@ ocr:
 
 
 qr-scan-url: http://localhost:4023/scanqr
-save-message: true
 tg-api-url: http://localhost:8081
 drop-pending-updates: false
 gemini-key: ABCDEFGHIJKLMNOPQRST
 gemini-explicit-cache: true
 deepseek-key: ""
 deepseek-base-url: https://api.deepseek.com
-backend-addr: 127.0.0.1:4021
-
-meili-config:
-  base-url: http://localhost:7700
-  index-name: tgmsgs
-  primary-key: mongo_id
-  master-key: ABCDEFGHIJKLMNOPQRST
 
 
 log-level: -1
 database-path: ":memory:"
 ai-media-path: "ai-media"
-msg-db-path: ":memory:"
-meili-wal-db-path: "meili-wal.db"
-meili-wal-batch-size: 500
 my-chats: [-1001471592463]

@@ -86,9 +86,10 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 
 type backupSelection struct {
 	includeMain bool
-	includeMsg  bool
 	raw         string
 }
+
+var errLegacyMessageBackupGone = errors.New("legacy message database has been archived and retired")
 
 type backupManifestDB struct {
 	Name string `json:"name"`
@@ -146,15 +147,15 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 func parseBackupSelection(param string) (backupSelection, error) {
 	value := strings.ToLower(strings.TrimSpace(param))
 	if value == "" {
-		value = "all"
+		value = "main"
 	}
 	switch value {
 	case "all":
-		return backupSelection{includeMain: true, includeMsg: true, raw: "all"}, nil
+		return backupSelection{includeMain: true, raw: "all"}, nil
 	case "main":
 		return backupSelection{includeMain: true, raw: "main"}, nil
 	case "msg":
-		return backupSelection{includeMsg: true, raw: "msg"}, nil
+		return backupSelection{}, errLegacyMessageBackupGone
 	default:
 		return backupSelection{}, fmt.Errorf("invalid db query: %s", param)
 	}
@@ -516,7 +517,11 @@ func backupDBHandler(logger *slog.Logger) http.HandlerFunc {
 
 		selection, err := parseBackupSelection(r.URL.Query().Get("db"))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			status := http.StatusBadRequest
+			if errors.Is(err, errLegacyMessageBackupGone) {
+				status = http.StatusGone
+			}
+			http.Error(w, err.Error(), status)
 			return
 		}
 		includeMedia, err := parseBackupMedia(r.URL.Query().Get("media"))
@@ -524,30 +529,18 @@ func backupDBHandler(logger *slog.Logger) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if includeMedia && !selection.includeMain {
-			http.Error(w, "media=1 requires db=main or db=all", http.StatusBadRequest)
-			return
-		}
-
 		cfg := g.GetConfig()
 		if cfg == nil {
 			http.Error(w, "config not initialized", http.StatusInternalServerError)
 			return
 		}
 
-		targets := make([]backupTarget, 0, 2)
+		targets := make([]backupTarget, 0, 1)
 		if selection.includeMain {
 			targets = append(targets, backupTarget{
 				name: "main",
 				path: cfg.DatabasePath,
 				db:   g.RawMainDb(),
-			})
-		}
-		if selection.includeMsg {
-			targets = append(targets, backupTarget{
-				name: "msg",
-				path: cfg.MsgDbPath,
-				db:   g.RawMsgsDb(),
 			})
 		}
 		for _, target := range targets {
@@ -684,7 +677,7 @@ func listAllRoutes(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	_, _ = w.Write([]byte("GET /loggers\nPUT /loggers/<name>/<:level,int8>\nGET /backupdb?db=all|main|msg&media=0|1\n"))
+	_, _ = w.Write([]byte("GET /loggers\nPUT /loggers/<name>/<:level,int8>\nGET /backupdb?db=main|all&media=0|1\n"))
 }
 
 func withLoggingAndRecovery(logger *slog.Logger, next http.Handler) http.Handler {

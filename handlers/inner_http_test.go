@@ -221,7 +221,7 @@ func TestRootListsRoutesForAnyMethod(t *testing.T) {
 	}
 }
 
-func TestBackupDBSuccessAll(t *testing.T) {
+func TestBackupDBSuccessMainByDefault(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
 
@@ -247,19 +247,19 @@ func TestBackupDBSuccessAll(t *testing.T) {
 	if _, ok := entries["main.db"]; !ok {
 		t.Fatalf("expected main.db in zip")
 	}
-	if _, ok := entries["msg.db"]; !ok {
-		t.Fatalf("expected msg.db in zip")
+	if _, ok := entries["msg.db"]; ok {
+		t.Fatalf("retired msg.db must not be in the archive")
 	}
 	manifestData, ok := entries["manifest.json"]
 	if !ok {
 		t.Fatalf("manifest missing")
 	}
 	manifest := parseManifest(t, manifestData)
-	if len(manifest.Databases) != 2 {
-		t.Fatalf("expected 2 databases, got %d", len(manifest.Databases))
+	if len(manifest.Databases) != 1 {
+		t.Fatalf("expected 1 database, got %d", len(manifest.Databases))
 	}
-	if manifest.Options["db"] != "all" {
-		t.Fatalf("expected manifest option db=all, got %s", manifest.Options["db"])
+	if manifest.Options["db"] != "main" {
+		t.Fatalf("expected manifest option db=main, got %s", manifest.Options["db"])
 	}
 	if manifest.Media.Included || manifest.CompleteAIDataset {
 		t.Fatalf("database-only backup must be marked as an incomplete AI dataset")
@@ -512,6 +512,31 @@ func TestBackupDBScopeMain(t *testing.T) {
 	}
 }
 
+func TestBackupDBAllRemainsMainOnlyAlias(t *testing.T) {
+	server := newTestServer()
+	defer server.Close()
+	resp, err := http.Get(server.URL + "/backupdb?db=all")
+	if err != nil {
+		t.Fatalf("get backupdb all alias: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 got %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	entries := tarZstdEntries(t, body)
+	if _, ok := entries["msg.db"]; ok {
+		t.Fatalf("all compatibility alias must not include retired msg.db")
+	}
+	manifest := parseManifest(t, entries["manifest.json"])
+	if manifest.Options["db"] != "all" || len(manifest.Databases) != 1 {
+		t.Fatalf("unexpected all alias manifest: %+v", manifest)
+	}
+}
+
 func TestBackupDBMediaModeMarksCompleteDataset(t *testing.T) {
 	originalDirectory, err := os.Getwd()
 	if err != nil {
@@ -562,13 +587,13 @@ func TestBackupDBInvalidSelection(t *testing.T) {
 		t.Fatalf("expected 400 got %d", resp.StatusCode)
 	}
 
-	resp, err = http.Get(server.URL + "/backupdb?db=msg&media=1")
+	resp, err = http.Get(server.URL + "/backupdb?db=msg")
 	if err != nil {
 		t.Fatalf("get invalid media scope: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("expected media without main database to return 400, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusGone {
+		t.Fatalf("expected retired message database to return 410, got %d", resp.StatusCode)
 	}
 }
 

@@ -9,7 +9,6 @@ import (
 	"main/globalcfg/aiq"
 	"main/globalcfg/q"
 	"main/helpers/azure"
-	"main/helpers/meilisearch"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -36,46 +35,30 @@ type OcrConfig struct {
 	Features string `koanf:"features"`
 }
 
-type MeiliConfig struct {
-	BaseUrl    string `koanf:"base-url"`
-	IndexName  string `koanf:"index-name"`
-	PrimaryKey string `koanf:"primary-key"`
-	MasterKey  string `koanf:"master-key"`
-}
-
 type Config struct {
-	BotToken            string      `koanf:"bot-token"`
-	God                 int64       `koanf:"god"`
-	MyChats             []int64     `koanf:"my-chats"`
-	AIChats             []int64     `koanf:"ai-chats"`
-	MeiliConfig         MeiliConfig `koanf:"meili-config"`
-	ContentModerator    Azure       `koanf:"content-moderator"`
-	Ocr                 OcrConfig   `koanf:"ocr"`
-	QrScanUrl           string      `koanf:"qr-scan-url"`
-	SaveMessage         bool        `koanf:"save-message"`
-	TgApiUrl            string      `koanf:"tg-api-url"`
-	DropPendingUpdates  bool        `koanf:"drop-pending-updates"`
-	LogLevel            int8        `koanf:"log-level"`
-	DatabasePath        string      `koanf:"database-path"`
-	AIMediaPath         string      `koanf:"ai-media-path"`
-	GeminiKey           string      `koanf:"gemini-key"`
-	GeminiExplicitCache *bool       `koanf:"gemini-explicit-cache"`
-	DeepSeekKey         string      `koanf:"deepseek-key"`
-	DeepSeekBaseURL     string      `koanf:"deepseek-base-url"`
-	BackendAddr         string      `koanf:"backend-addr"`
-	MsgDbPath           string      `koanf:"msg-db-path"`
-	MeiliWalDbPath      string      `koanf:"meili-wal-db-path"`
-	MeiliWalBatchSize   int         `koanf:"meili-wal-batch-size"`
+	BotToken            string    `koanf:"bot-token"`
+	God                 int64     `koanf:"god"`
+	MyChats             []int64   `koanf:"my-chats"`
+	AIChats             []int64   `koanf:"ai-chats"`
+	ContentModerator    Azure     `koanf:"content-moderator"`
+	Ocr                 OcrConfig `koanf:"ocr"`
+	QrScanUrl           string    `koanf:"qr-scan-url"`
+	TgApiUrl            string    `koanf:"tg-api-url"`
+	DropPendingUpdates  bool      `koanf:"drop-pending-updates"`
+	LogLevel            int8      `koanf:"log-level"`
+	DatabasePath        string    `koanf:"database-path"`
+	AIMediaPath         string    `koanf:"ai-media-path"`
+	GeminiKey           string    `koanf:"gemini-key"`
+	GeminiExplicitCache *bool     `koanf:"gemini-explicit-cache"`
+	DeepSeekKey         string    `koanf:"deepseek-key"`
+	DeepSeekBaseURL     string    `koanf:"deepseek-base-url"`
 
 	LogFile  string `koanf:"log-file"`
 	NoStdout bool   `koanf:"no-stdout"`
 }
 
 const (
-	DefaultMeiliWalDbPath    = "meili-wal.db"
-	DefaultMeiliWalBatchSize = 500
-	DefaultDeepSeekBaseURL   = "https://api.deepseek.com"
-	DefaultBackendAddr       = "127.0.0.1:4021"
+	DefaultDeepSeekBaseURL = "https://api.deepseek.com"
 )
 
 var gMu sync.Mutex
@@ -150,20 +133,6 @@ var moderator = NewPtrLinkedCfg(
 	},
 )
 
-var meili = NewPtrLinkedCfg(
-	func(old, new *Config) bool {
-		return old.MeiliConfig != new.MeiliConfig
-	},
-	func(new *Config) *meilisearch.Client {
-		return meilisearch.NewMeiliClient(
-			new.MeiliConfig.BaseUrl,
-			new.MeiliConfig.IndexName,
-			new.MeiliConfig.MasterKey,
-			new.MeiliConfig.PrimaryKey,
-		)
-	},
-)
-
 var loggers = make(map[string]LoggerWithLevel)
 
 func loadConfig(k *koanf.Koanf, provider *file.File) (*Config, error) {
@@ -190,20 +159,8 @@ func normalizeConfig(cfg *Config) {
 	if value := os.Getenv("DEEPSEEK_API_KEY"); value != "" {
 		cfg.DeepSeekKey = value
 	}
-	if value := os.Getenv("YTYAN_BACKEND_ADDR"); value != "" {
-		cfg.BackendAddr = value
-	}
-	if cfg.MeiliWalDbPath == "" {
-		cfg.MeiliWalDbPath = DefaultMeiliWalDbPath
-	}
-	if cfg.MeiliWalBatchSize <= 0 {
-		cfg.MeiliWalBatchSize = DefaultMeiliWalBatchSize
-	}
 	if cfg.DeepSeekBaseURL == "" {
 		cfg.DeepSeekBaseURL = DefaultDeepSeekBaseURL
-	}
-	if cfg.BackendAddr == "" {
-		cfg.BackendAddr = DefaultBackendAddr
 	}
 	if cfg.AIMediaPath == "" {
 		if cfg.DatabasePath == "" || cfg.DatabasePath == ":memory:" {
@@ -244,11 +201,8 @@ func InitConfig() {
 			return
 		}
 		oldCfg := config.Load()
-		if oldCfg.DatabasePath != cfg2.DatabasePath || oldCfg.MsgDbPath != cfg2.MsgDbPath ||
-			oldCfg.MeiliWalDbPath != cfg2.MeiliWalDbPath || oldCfg.AIMediaPath != cfg2.AIMediaPath {
+		if oldCfg.DatabasePath != cfg2.DatabasePath || oldCfg.AIMediaPath != cfg2.AIMediaPath {
 			log.Printf("database path cannot be changed without restart, old: %s, new: %s", oldCfg.DatabasePath, cfg2.DatabasePath)
-			log.Printf("message database path cannot be changed without restart, old: %s, new: %s", oldCfg.MsgDbPath, cfg2.MsgDbPath)
-			log.Printf("meili wal database path cannot be changed without restart, old: %s, new: %s", oldCfg.MeiliWalDbPath, cfg2.MeiliWalDbPath)
 			log.Printf("AI media path cannot be changed without restart, old: %s, new: %s", oldCfg.AIMediaPath, cfg2.AIMediaPath)
 			return
 		}
@@ -262,19 +216,8 @@ func InitConfig() {
 	config.Store(cfg)
 	SetAllLoggerLevels(slog.Level(cfg.LogLevel))
 	db = getSqliteConn(config.Load().DatabasePath)
-	msgDb = getSqliteConn(config.Load().MsgDbPath)
-	meiliWalDbPath := config.Load().MeiliWalDbPath
-	if testing.Testing() {
-		meiliWalDbPath = ":memory:"
-	}
-	meiliWalDb = getSqliteConn(meiliWalDbPath)
-	if err := InitMeiliWalDbSchema(meiliWalDb); err != nil {
-		panic(err)
-	}
 	if testing.Testing() && config.Load().DatabasePath == ":memory:" {
 		initMainDatabaseInMemory(db)
-		_ = msgDb.Close()
-		msgDb = db
 	}
 	if err := runDatabaseMigrations(db); err != nil {
 		panic(err)
@@ -307,28 +250,10 @@ func Moderator() *azure.ModeratorV2 {
 	return moderator.Get()
 }
 
-func Meili() *meilisearch.Client {
-	return meili.Get()
-}
-
 var db *sql.DB
-var msgDb *sql.DB
-var meiliWalDb *sql.DB
 
 var Q *q.Queries
 var AIQ *aiq.Queries
-
-const meiliWalSchema = `
-CREATE TABLE IF NOT EXISTS meili_wal
-(
-	id      INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-	content TEXT    NOT NULL CHECK (json_valid(content))
-);`
-
-func InitMeiliWalDbSchema(database *sql.DB) error {
-	_, err := database.Exec(meiliWalSchema)
-	return err
-}
 
 func getSqliteConn(dbPath string) *sql.DB {
 	check := func(_ sql.Result, e error) {
@@ -370,14 +295,6 @@ func getSqliteConn(dbPath string) *sql.DB {
 
 func RawMainDb() *sql.DB {
 	return db
-}
-
-func RawMsgsDb() *sql.DB {
-	return msgDb
-}
-
-func RawMeiliWalDb() *sql.DB {
-	return meiliWalDb
 }
 
 func init() {

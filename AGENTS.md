@@ -11,6 +11,7 @@ These instructions apply to the whole repository.
 - Register main-database migration definitions in `globalcfg/migrationdefs` and their transactional runners in `internal/mainmigrations`, with a strictly increasing version and stable source checksum. Mark large rewrites as offline so normal startup refuses to apply them.
 - Main-database migration runners live in `internal/mainmigrations`; `globalcfg/migrations.go` is only the runtime adapter. Use `cmd/db-init` for a new canonical database and `cmd/main-db-migrate` for post-V2 offline rewrites. Never initialize or rewrite a production database in place.
 - `sql.Canonical()` is the explicit fresh-database schema list. Migration-only legacy schemas belong under `sql/migrate/`; do not restore glob-based `schema_*.sql` loading.
+- The legacy message SQLite database, Meilisearch writer/WAL, and search HTTP backend are retired. Preserve their verified offline archive, but do not restore runtime connections or configuration without a new product requirement.
 - Configure SQLite connection-wide behavior through the DSN or a connection hook so every pooled connection enables foreign keys and the same timeout/journal settings.
 - A SQL change is accepted only after a second `sqlc generate` is idempotent, targeted tests pass, `go test ./...` passes, and the project builds completely.
 

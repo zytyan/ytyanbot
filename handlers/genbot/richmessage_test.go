@@ -63,10 +63,8 @@ func TestSendAIRichMessageOmitsEmptyKeyboard(t *testing.T) {
 	require.NotContains(t, client.params, "reply_markup")
 }
 
-func TestDefaultPromptRequestsRichMarkdown(t *testing.T) {
-	require.Contains(t, gDefaultSysPrompt, "Telegram Rich Markdown")
-	require.Contains(t, gDefaultSysPrompt, "表格")
-	require.Contains(t, gDefaultSysPrompt, "LaTeX 公式")
-	require.Contains(t, gDefaultSysPrompt, "块公式使用 $$...$$")
+func TestDefaultPromptAllowsLatex(t *testing.T) {
 	require.NotContains(t, gDefaultSysPrompt, "telegram不支持")
+	require.NotContains(t, gDefaultSysPrompt, "不要使用latex公式")
+	require.Contains(t, gDefaultSysPrompt, "请对大家温柔一些。")
 }

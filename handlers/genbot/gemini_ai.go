@@ -2,6 +2,7 @@ package genbot
 
 import (
 	"context"
+	"database/sql"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -102,21 +103,30 @@ var geminiSysPromptReplacer = NewReplacer(gDefaultSysPrompt)
 var sysPromptReplacerCache = make(map[geminiTopic]*Replacer)
 var gMu sync.Mutex
 
-func getSysPrompt(msg *gotgbot.Message) *Replacer {
+func invalidateSysPrompt(topic geminiTopic) {
+	gMu.Lock()
+	defer gMu.Unlock()
+	delete(sysPromptReplacerCache, topic)
+}
+
+func getSysPrompt(msg *gotgbot.Message) (*Replacer, error) {
 	gMu.Lock()
 	defer gMu.Unlock()
 	topic := newTopic(msg)
 	if r, ok := sysPromptReplacerCache[topic]; ok {
-		return r
+		return r, nil
 	}
 	tmpl, err := g.AIQ.GetAISystemPrompt(context.Background(), topic.chatId, topic.topicId)
-	if err == nil {
+	if err == nil && tmpl != "" {
 		r := NewReplacer(tmpl)
 		sysPromptReplacerCache[topic] = &r
-		return &r
+		return &r, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
 	}
 	sysPromptReplacerCache[topic] = &geminiSysPromptReplacer
-	return &geminiSysPromptReplacer
+	return &geminiSysPromptReplacer, nil
 }
 
 func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
@@ -134,7 +144,10 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 	}
 	session.mu.Lock()
 	defer session.mu.Unlock()
-	promptReplacer := getSysPrompt(msg)
+	promptReplacer, err := getSysPrompt(msg)
+	if err != nil {
+		return fmt.Errorf("get system prompt: %w", err)
+	}
 	setReaction(bot, msg, "👀")
 
 	sysPromptCtx := ReplaceCtx{

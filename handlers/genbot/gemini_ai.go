@@ -9,7 +9,6 @@ import (
 	g "main/globalcfg"
 	"main/globalcfg/h"
 	genai "main/handlers/genbot/geminiapi"
-	"main/helpers/mdnormalizer"
 	"math/rand/v2"
 	"regexp"
 	"slices"
@@ -214,23 +213,15 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 		}
 		setReaction(bot, msg, "🤯")
 	}
-	normTxt, err := mdnormalizer.Normalize(aiText)
-	var respMsg *gotgbot.Message
-	replyOpts := &gotgbot.SendMessageOpts{}
+	var replyMarkup gotgbot.ReplyMarkup
 	showUsage, usageErr := g.GetAIChatUsageEnabled(genCtx, msg.Chat.Id)
 	if usageErr != nil {
 		return usageErr
 	}
 	if showUsage {
-		replyOpts.ReplyMarkup = usageKeyboard()
+		replyMarkup = usageKeyboard()
 	}
-	if err != nil {
-		respMsg, err = ctx.EffectiveMessage.Reply(bot, aiText, replyOpts)
-		log.Warn("parse markdown failed", "err", err)
-	} else {
-		replyOpts.Entities = normTxt.Entities
-		respMsg, err = ctx.EffectiveMessage.Reply(bot, normTxt.Text, replyOpts)
-	}
+	respMsg, err := sendAIRichMessage(genCtx, bot, ctx.EffectiveMessage, aiText, replyMarkup)
 	if err != nil {
 		log.Warn("ai response", "resp", string(res.Raw), "err", err)
 		_ = MarkAIRunFailed(genCtx, run.ID, "delivery_failed", normalizeAIRunErrorCode(err), err)

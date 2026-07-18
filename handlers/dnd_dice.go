@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
@@ -214,7 +215,104 @@ func CoCHelp(bot *gotgbot.Bot, ctx *ext.Context) (err error) {
 	return err
 }
 
-var battleMap = make(map[string]*cocdice.BattleRound)
+type battleSession struct {
+	mu      sync.Mutex
+	groupID int64
+	round   *cocdice.BattleRound
+}
+
+func (s *battleSession) render() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.round.String()
+}
+
+func (s *battleSession) next() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.round.NextCharacter()
+	return s.round.String()
+}
+
+func (s *battleSession) execute(commands []string) (string, []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	errors := make([]string, 0)
+	for _, command := range commands {
+		if err := s.round.ParseCommand(command); err != nil {
+			errors = append(errors, err.Error())
+		}
+	}
+	return s.round.String(), errors
+}
+
+type battleRegistry struct {
+	mu      sync.RWMutex
+	byID    map[string]*battleSession
+	byGroup map[int64]string
+}
+
+func newBattleRegistry() *battleRegistry {
+	return &battleRegistry{
+		byID:    make(map[string]*battleSession),
+		byGroup: make(map[int64]string),
+	}
+}
+
+func (r *battleRegistry) add(uid string, session *battleSession) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.byID[uid]; exists {
+		return false
+	}
+	if _, exists := r.byGroup[session.groupID]; exists {
+		return false
+	}
+	r.byGroup[session.groupID] = uid
+	r.byID[uid] = session
+	return true
+}
+
+func (r *battleRegistry) byUID(uid string, groupID int64) (*battleSession, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	session, ok := r.byID[uid]
+	return session, ok && session.groupID == groupID
+}
+
+func (r *battleRegistry) forGroup(groupID int64) (string, *battleSession, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	uid, ok := r.byGroup[groupID]
+	if !ok {
+		return "", nil, false
+	}
+	session, ok := r.byID[uid]
+	return uid, session, ok
+}
+
+func (r *battleRegistry) remove(uid string, groupID int64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	session, ok := r.byID[uid]
+	if !ok || session.groupID != groupID {
+		return false
+	}
+	delete(r.byID, uid)
+	if r.byGroup[groupID] == uid {
+		delete(r.byGroup, groupID)
+	}
+	return true
+}
+
+func (r *battleRegistry) hasGroup(groupID int64) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.byGroup[groupID]
+	return ok
+}
+
+var battles = newBattleRegistry()
 
 func buildBattleKeyboard(uid string) gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{
@@ -225,21 +323,17 @@ func buildBattleKeyboard(uid string) gotgbot.InlineKeyboardMarkup {
 	}
 }
 
-var battleGroupIdToUuid = make(map[int64]string)
-
 func NewBattle(bot *gotgbot.Bot, ctx *ext.Context) (err error) {
 	gid := ctx.EffectiveChat.Id
 	log.Info("battle gid", "gid", gid)
-	if _, ok := battleGroupIdToUuid[gid]; ok {
+	uid, _ := uuid.NewUUID()
+	uidStr := uid.String()
+	session := &battleSession{groupID: gid, round: cocdice.NewFromText(ctx.EffectiveMessage.Text)}
+	if !battles.add(uidStr, session) {
 		_, err = ctx.EffectiveMessage.Reply(bot, "已经有一个战斗在进行中", nil)
 		return err
 	}
-	uid, _ := uuid.NewUUID()
-	uidStr := uid.String()
-	battle := cocdice.NewFromText(ctx.EffectiveMessage.Text)
-	battleGroupIdToUuid[gid] = uidStr
-	battleMap[uidStr] = battle
-	_, err = ctx.EffectiveMessage.Reply(bot, battle.String(), &gotgbot.SendMessageOpts{ParseMode: "HTML",
+	_, err = ctx.EffectiveMessage.Reply(bot, session.render(), &gotgbot.SendMessageOpts{ParseMode: "HTML",
 		ReplyMarkup: buildBattleKeyboard(uidStr),
 	})
 	return err
@@ -255,8 +349,7 @@ func IsStopBattle(msg *gotgbot.CallbackQuery) bool {
 
 func StopBattle(bot *gotgbot.Bot, ctx *ext.Context) (err error) {
 	uid := getBattleUid(ctx.CallbackQuery.Data)
-	delete(battleMap, uid)
-	delete(battleGroupIdToUuid, ctx.EffectiveChat.Id)
+	battles.remove(uid, ctx.EffectiveChat.Id)
 	_, _ = ctx.CallbackQuery.Answer(bot, &gotgbot.AnswerCallbackQueryOpts{Text: "战斗结束", ShowAlert: true})
 	_, err = ctx.EffectiveMessage.Reply(bot, "战斗结束", nil)
 	return err
@@ -264,14 +357,14 @@ func StopBattle(bot *gotgbot.Bot, ctx *ext.Context) (err error) {
 
 func NextRound(bot *gotgbot.Bot, ctx *ext.Context) (err error) {
 	uid := getBattleUid(ctx.CallbackQuery.Data)
-	battle, ok := battleMap[uid]
+	battle, ok := battles.byUID(uid, ctx.EffectiveChat.Id)
 	if !ok {
 		_, err = ctx.EffectiveMessage.Reply(bot, "战斗已经结束", nil)
 		return err
 	}
-	battle.NextCharacter()
+	result := battle.next()
 	_, _ = ctx.CallbackQuery.Answer(bot, &gotgbot.AnswerCallbackQueryOpts{Text: "下一回合", ShowAlert: false})
-	_, err = ctx.EffectiveMessage.Reply(bot, battle.String(), &gotgbot.SendMessageOpts{ParseMode: "HTML",
+	_, err = ctx.EffectiveMessage.Reply(bot, result, &gotgbot.SendMessageOpts{ParseMode: "HTML",
 		ReplyMarkup: buildBattleKeyboard(uid),
 	})
 	return err
@@ -285,7 +378,7 @@ func getBattleUid(data string) string {
 
 func IsBattleCommand(msg *gotgbot.Message) bool {
 	gid := msg.Chat.Id
-	if _, ok := battleGroupIdToUuid[gid]; ok {
+	if battles.hasGroup(gid) {
 		return reBattleCmd.MatchString(msg.Text)
 	}
 	if msg.ReplyToMessage == nil {
@@ -303,27 +396,22 @@ func IsBattleCommand(msg *gotgbot.Message) bool {
 }
 
 func ExecuteBattleCommand(bot *gotgbot.Bot, ctx *ext.Context) (err error) {
-	uid := battleGroupIdToUuid[ctx.EffectiveChat.Id]
-	battle, ok := battleMap[uid]
+	uid, battle, ok := battles.forGroup(ctx.EffectiveChat.Id)
 	if !ok {
 		_, err = ctx.EffectiveMessage.Reply(bot, "战斗已经结束", nil)
 		return err
 	}
 	textList := strings.Split(ctx.EffectiveMessage.Text, "\n")
-	errList := make([]string, 0)
 	for _, text := range textList {
 		log.Info("battle command", "text", text)
-		err = battle.ParseCommand(text)
-		if err != nil {
-			errList = append(errList, err.Error())
-		}
 	}
+	result, errList := battle.execute(textList)
 	if len(errList) > 0 {
 		errStr := strings.Join(errList, "\n")
 		_, err = ctx.EffectiveMessage.Reply(bot, errStr, nil)
 		return err
 	}
-	_, err = ctx.EffectiveMessage.Reply(bot, battle.String(), &gotgbot.SendMessageOpts{ParseMode: "HTML",
+	_, err = ctx.EffectiveMessage.Reply(bot, result, &gotgbot.SendMessageOpts{ParseMode: "HTML",
 		ReplyMarkup: buildBattleKeyboard(uid),
 	})
 	return err

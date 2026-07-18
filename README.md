@@ -152,6 +152,8 @@ npm run dev
 
 `/backupdb` 默认保持仅备份 SQLite 数据库的行为，Manifest 会将其标记为不完整的 AI 数据集。使用 `/backupdb?db=main&media=1`（或 `db=all`）会按一致的主库快照引用打包 `ai-media/` 内容寻址对象，同时写入 `media-manifest.tsv`、对象数量、总字节数和清单 SHA-256。完整媒体备份的最长执行时间可通过 `GOYTYAN_BACKUP_MAX_DURATION` 配置（Go duration 格式，默认 `30m`），客户端取消请求也会终止备份。
 
+内部 HTTP 服务默认只监听 `127.0.0.1:4019`。设置 `GOYTYAN_BACKUP_TOKEN` 后，`/backupdb`、统计写入、logger 管理和 pprof 等全部端点都需要通过 `X-Backup-Token` 请求头（或兼容的 `token` 查询参数）认证；`BOT_INNER_HTTP` 配置为非回环地址时，如果没有设置该 token，服务会拒绝监听。
+
 AI V1 → V2 必须使用离线工具，候选程序会拒绝直接打开尚未完成 V3 迁移的旧库：
 
 ```bash

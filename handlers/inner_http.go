@@ -199,6 +199,17 @@ func checkBackupToken(r *http.Request, token string) bool {
 	return r.Header.Get("X-Backup-Token") == token
 }
 
+func withInnerHTTPAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !checkBackupToken(r, os.Getenv(backupTokenEnvKey)) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte("unauthorized"))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func decodeJSONBody(w http.ResponseWriter, req *http.Request, v any) error {
 	defer req.Body.Close()
 	reader := http.MaxBytesReader(w, req.Body, maxRequestBodyBytes)
@@ -508,13 +519,6 @@ func backupDBHandler(logger *slog.Logger) http.HandlerFunc {
 			return
 		}
 
-		token := os.Getenv(backupTokenEnvKey)
-		if !checkBackupToken(r, token) {
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte("unauthorized"))
-			return
-		}
-
 		selection, err := parseBackupSelection(r.URL.Query().Get("db"))
 		if err != nil {
 			status := http.StatusBadRequest
@@ -726,7 +730,7 @@ func buildHandler(logger *slog.Logger) http.Handler {
 	mux.HandleFunc("/loggers/", setLoggerLevel)
 	mux.HandleFunc("/", listAllRoutes)
 	pprofHandlers(mux)
-	return withLoggingAndRecovery(logger, mux)
+	return withLoggingAndRecovery(logger, withInnerHTTPAuth(mux))
 }
 
 func resolveInnerHTTPAddr(envValue string) (addr string, enabled bool) {
@@ -742,11 +746,28 @@ func resolveInnerHTTPAddr(envValue string) (addr string, enabled bool) {
 	return envValue, true
 }
 
+func innerHTTPAddrRequiresToken(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return true
+	}
+	if strings.EqualFold(host, "localhost") {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip == nil || !ip.IsLoopback()
+}
+
 func HttpListen4019() {
 	logger := g.GetLogger("inner-http", slog.LevelWarn)
 	addr, enabled := resolveInnerHTTPAddr(os.Getenv(innerHTTPEnvKey))
 	if !enabled {
 		logger.Info("inner http server disabled", "env", innerHTTPEnvKey)
+		return
+	}
+	if innerHTTPAddrRequiresToken(addr) && strings.TrimSpace(os.Getenv(backupTokenEnvKey)) == "" {
+		logger.Error("refusing non-loopback inner http without authentication token",
+			"addr", addr, "token_env", backupTokenEnvKey)
 		return
 	}
 

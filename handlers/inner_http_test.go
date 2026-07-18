@@ -173,6 +173,38 @@ func TestPprofIndexAvailable(t *testing.T) {
 	}
 }
 
+func TestInnerHTTPTokenProtectsEveryOperationalRoute(t *testing.T) {
+	t.Setenv(backupTokenEnvKey, "all-routes-secret")
+	server := newTestServer()
+	defer server.Close()
+
+	paths := []string{"/", "/loggers", "/debug/pprof/", "/mars-counter", "/dio-ban", "/backupdb"}
+	for _, route := range paths {
+		resp, err := http.Get(server.URL + route)
+		if err != nil {
+			t.Fatalf("get %s: %v", route, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("GET %s status = %d, want 401", route, resp.StatusCode)
+		}
+	}
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/debug/pprof/", nil)
+	if err != nil {
+		t.Fatalf("new authorized request: %v", err)
+	}
+	req.Header.Set("X-Backup-Token", "all-routes-secret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("authorized pprof request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("authorized pprof status = %d, want 200", resp.StatusCode)
+	}
+}
+
 func TestResolveInnerHTTPAddr(t *testing.T) {
 	addr, enabled := resolveInnerHTTPAddr("")
 	if !enabled || addr != innerHTTPDefaultAddr {
@@ -187,6 +219,25 @@ func TestResolveInnerHTTPAddr(t *testing.T) {
 	addr, enabled = resolveInnerHTTPAddr("127.0.0.1:12345")
 	if !enabled || addr != "127.0.0.1:12345" {
 		t.Fatalf("unexpected addr parsing, got %s enabled=%v", addr, enabled)
+	}
+}
+
+func TestInnerHTTPAddrRequiresToken(t *testing.T) {
+	tests := []struct {
+		addr string
+		want bool
+	}{
+		{addr: "127.0.0.1:4019"},
+		{addr: "[::1]:4019"},
+		{addr: "localhost:4019"},
+		{addr: "0.0.0.0:4019", want: true},
+		{addr: ":4019", want: true},
+		{addr: "192.0.2.1:4019", want: true},
+	}
+	for _, test := range tests {
+		if got := innerHTTPAddrRequiresToken(test.addr); got != test.want {
+			t.Errorf("innerHTTPAddrRequiresToken(%q) = %v, want %v", test.addr, got, test.want)
+		}
 	}
 }
 

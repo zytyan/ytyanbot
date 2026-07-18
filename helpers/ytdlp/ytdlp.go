@@ -15,7 +15,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
@@ -180,7 +179,7 @@ func parseBilibiliJsonData(body io.Reader) (Info, error) {
 	return info, nil
 }
 
-func getBilibiliVideoInfo(url string) (info Info, err error) {
+func getBilibiliVideoInfo(ctx context.Context, url string) (info Info, err error) {
 	info = Info{
 		Title:    "未知标题",
 		Uploader: "未知上传者",
@@ -188,7 +187,7 @@ func getBilibiliVideoInfo(url string) (info Info, err error) {
 	}
 	location := url
 	if strings.Contains(location, "b23.tv") {
-		req, err := http.NewRequest(http.MethodGet, url, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return info, err
 		}
@@ -216,7 +215,11 @@ func getBilibiliVideoInfo(url string) (info Info, err error) {
 	default:
 		return info, fmt.Errorf("localtion AV/BV not in regular %s", location)
 	}
-	resp, err := client.Get(reqUrl)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqUrl, nil)
+	if err != nil {
+		return info, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return info, err
 	}
@@ -224,19 +227,30 @@ func getBilibiliVideoInfo(url string) (info Info, err error) {
 	return parseBilibiliJsonData(resp.Body)
 }
 
+type bilibiliInfoResult struct {
+	info Info
+	err  error
+}
+
+func runBBDownConcurrent(download func() error, loadInfo func() (Info, error)) (Info, error, error) {
+	infoResults := make(chan bilibiliInfoResult, 1)
+	go func() {
+		result := bilibiliInfoResult{}
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				result.err = fmt.Errorf("get BilibiliVideoInfo panic: %v", recovered)
+			}
+			infoResults <- result
+		}()
+		result.info, result.err = loadInfo()
+	}()
+	downloadErr := download()
+	infoResult := <-infoResults
+	return infoResult.info, infoResult.err, downloadErr
+}
+
 func (c *Req) runWithCtxBBDown(ctx context.Context) (resp *Resp, err error) {
 	resp = &Resp{req: c}
-	wg := sync.WaitGroup{}
-	wg.Go(func() {
-		defer func() {
-			if r := recover(); r != nil {
-				resp.InfoJsonErr = fmt.Errorf("get BilibiliVideoInfo error: %s", r)
-			}
-
-		}()
-		resp.Info, resp.InfoJsonErr = getBilibiliVideoInfo(c.Url)
-	})
-
 	tmp := c.tmpPath
 	tmp, err = filepath.Abs(tmp)
 	if err != nil {
@@ -248,18 +262,22 @@ func (c *Req) runWithCtxBBDown(ctx context.Context) (resp *Resp, err error) {
 	cmd.Stdout = outBuf
 	cmd.Stderr = errBuf
 	cmd.Dir = tmp
-	err = cmd.Run()
+	resp.Info, resp.InfoJsonErr, err = runBBDownConcurrent(cmd.Run, func() (Info, error) {
+		return getBilibiliVideoInfo(ctx, c.Url)
+	})
 	var exitErr *exec.ExitError
-	if err != nil && errors.As(err, &exitErr) {
-		return resp, &RunError{
-			Err:      err,
-			Stdout:   outBuf.String(),
-			Stderr:   errBuf.String(),
-			ExitCode: exitErr.ExitCode(),
-			Args:     cmd.Args,
+	if err != nil {
+		if errors.As(err, &exitErr) {
+			return resp, &RunError{
+				Err:      err,
+				Stdout:   outBuf.String(),
+				Stderr:   errBuf.String(),
+				ExitCode: exitErr.ExitCode(),
+				Args:     cmd.Args,
+			}
 		}
+		return resp, err
 	}
-	wg.Wait()
 	resp.FilePath, err = getFirstFile(tmp)
 	if err != nil {
 		return nil, err

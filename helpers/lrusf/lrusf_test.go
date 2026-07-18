@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestCacheGetAddRemove(t *testing.T) {
@@ -136,6 +137,61 @@ func TestCacheEvictionLRU(t *testing.T) {
 	}
 	if v, ok := cache.TryGet(3); !ok || v != "c" {
 		t.Fatalf("expected key 3 to remain")
+	}
+}
+
+func TestCacheWithoutCallbackDoesNotLeaveEvictionPending(t *testing.T) {
+	cache := NewCache[int, string](1, func(k int) string { return strconv.Itoa(k) }, nil)
+	cache.Add(1, "old")
+	cache.Add(2, "new")
+	if _, ok := cache.TryGet(1); ok {
+		t.Fatal("evicted key should miss")
+	}
+}
+
+func TestGetWaitsForSameKeyEvictionCallback(t *testing.T) {
+	callbackStarted := make(chan struct{})
+	callbackContinue := make(chan struct{})
+	var blockFirstEviction sync.Once
+	cache := NewCache[int, string](1, func(k int) string { return strconv.Itoa(k) }, func(_ int, _ string) {
+		blockFirstEviction.Do(func() {
+			close(callbackStarted)
+			<-callbackContinue
+		})
+	})
+	cache.Add(1, "old")
+	addDone := make(chan struct{})
+	go func() {
+		cache.Add(2, "new")
+		close(addDone)
+	}()
+	<-callbackStarted
+
+	fetchCalled := make(chan struct{})
+	getStarted := make(chan struct{})
+	getDone := make(chan string, 1)
+	go func() {
+		close(getStarted)
+		value, err := cache.Get(1, func() (string, error) {
+			close(fetchCalled)
+			return "persisted", nil
+		})
+		if err != nil {
+			t.Errorf("Get error: %v", err)
+		}
+		getDone <- value
+	}()
+	<-getStarted
+	select {
+	case <-fetchCalled:
+		t.Fatal("fetch ran before the eviction callback completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(callbackContinue)
+	<-addDone
+	if value := <-getDone; value != "persisted" {
+		t.Fatalf("Get value = %q, want persisted", value)
 	}
 }
 

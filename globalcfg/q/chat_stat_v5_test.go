@@ -53,3 +53,26 @@ func TestChatStatSaveAndLoadNormalizedRows(t *testing.T) {
   (SELECT COUNT(*) FROM chat_stat_user_daily) + (SELECT COUNT(*) FROM chat_stat_bucket_daily)`).Scan(&childCount))
 	require.Zero(t, childCount)
 }
+
+func TestFailedEvictionRetainsChatStatForReload(t *testing.T) {
+	database, err := sql.Open("sqlite3", ":memory:?_foreign_keys=on")
+	require.NoError(t, err)
+	database.SetMaxOpenConns(1)
+	for _, schema := range aischema.Canonical() {
+		_, err = database.Exec(schema)
+		require.NoError(t, err)
+	}
+	queries := New(database)
+	daily, err := queries.createChatStatDaily(context.Background(), -101, 20001)
+	require.NoError(t, err)
+	stat := &ChatStat{ChatStatSnapshot: ChatStatSnapshot{
+		ChatStatDaily: daily,
+		UserMsgStat:   make(UserMsgStatMap),
+	}}
+	stat.IncMessage(42, 5, 100, 900)
+	require.NoError(t, database.Close())
+
+	key := ChatStatKey{Id: daily.ChatID, Day: daily.StatDate}
+	saveEvictedChatStat(queries, key, stat)
+	require.Same(t, stat, takePendingChatStat(key))
+}

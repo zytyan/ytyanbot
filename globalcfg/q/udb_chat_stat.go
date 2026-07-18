@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"main/helpers/lrusf"
 	"sync"
 	"time"
@@ -248,6 +249,48 @@ type ChatStatKey struct {
 
 var chatStatCache *lrusf.Cache[ChatStatKey, *ChatStat]
 
+var pendingChatStats = struct {
+	mu    sync.Mutex
+	items map[ChatStatKey]*ChatStat
+}{items: make(map[ChatStatKey]*ChatStat)}
+
+func saveEvictedChatStat(q *Queries, key ChatStatKey, stat *ChatStat) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := stat.Save(ctx, q); err != nil {
+		pendingChatStats.mu.Lock()
+		pendingChatStats.items[key] = stat
+		pendingChatStats.mu.Unlock()
+		slog.Error("save evicted chat statistic", "chat_id", key.Id, "day", key.Day, "err", err)
+	}
+}
+
+func takePendingChatStat(key ChatStatKey) *ChatStat {
+	pendingChatStats.mu.Lock()
+	defer pendingChatStats.mu.Unlock()
+	stat := pendingChatStats.items[key]
+	delete(pendingChatStats.items, key)
+	return stat
+}
+
+func pendingChatStatSnapshot() map[ChatStatKey]*ChatStat {
+	pendingChatStats.mu.Lock()
+	defer pendingChatStats.mu.Unlock()
+	snapshot := make(map[ChatStatKey]*ChatStat, len(pendingChatStats.items))
+	for key, stat := range pendingChatStats.items {
+		snapshot[key] = stat
+	}
+	return snapshot
+}
+
+func removePendingChatStat(key ChatStatKey, saved *ChatStat) {
+	pendingChatStats.mu.Lock()
+	defer pendingChatStats.mu.Unlock()
+	if pendingChatStats.items[key] == saved {
+		delete(pendingChatStats.items, key)
+	}
+}
+
 // FlushChatStats saves all in-memory chat statistics to the database.
 // It is safe to call concurrently with other stat operations.
 func (q *Queries) FlushChatStats(ctx context.Context) error {
@@ -259,6 +302,18 @@ func (q *Queries) FlushChatStats(ctx context.Context) error {
 		if err := stat.Save(ctx, q); err != nil && firstErr == nil {
 			firstErr = err
 		}
+	}
+	for key, stat := range pendingChatStatSnapshot() {
+		if stat == nil {
+			continue
+		}
+		if err := stat.Save(ctx, q); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		removePendingChatStat(key, stat)
 	}
 	return firstErr
 }
@@ -309,6 +364,9 @@ func (q *Queries) chatStatAtWithTimezone(ctx context.Context, chatId, unixTime, 
 		Id:  chatId,
 	}
 	return chatStatCache.Get(key, func() (*ChatStat, error) {
+		if pending := takePendingChatStat(key); pending != nil {
+			return pending, nil
+		}
 		snapshot, err := q.getOrCreateChatStat(ctx, chatId, day)
 		if err != nil {
 			return nil, err

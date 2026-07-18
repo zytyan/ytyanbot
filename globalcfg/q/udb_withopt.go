@@ -36,12 +36,12 @@ func initCaches(q *Queries) {
 		chatCache = lrusf.NewCache[int64, *ChatCfg](2048, id2str, func(i int64, cfg *ChatCfg) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 			defer cancel()
-			_ = cfg.Save(ctx, q)
+			if err := cfg.Save(ctx, q); err != nil {
+				slog.Error("save evicted chat config", "chat_id", i, "err", err)
+			}
 		})
 		chatStatCache = lrusf.NewCache[ChatStatKey, *ChatStat](64, chatStatCacheKey, func(key ChatStatKey, daily *ChatStat) {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
-			defer cancel()
-			_ = daily.Save(ctx, q)
+			saveEvictedChatStat(q, key, daily)
 		})
 	})
 }

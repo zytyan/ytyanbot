@@ -9,13 +9,14 @@ import (
 )
 
 type Cache[K comparable, V any] struct {
-	mu      sync.Mutex
-	cap     int
-	ll      *list.List
-	items   map[K]*list.Element
-	sf      singleflight.Group
-	keyFn   func(K) string
-	onEvict func(key K, value V) // NEW
+	mu       sync.Mutex
+	cap      int
+	ll       *list.List
+	items    map[K]*list.Element
+	evicting map[K]chan struct{}
+	sf       singleflight.Group
+	keyFn    func(K) string
+	onEvict  func(key K, value V)
 }
 
 type entry[K comparable, V any] struct {
@@ -34,11 +35,12 @@ func NewCache[K comparable, V any](cap int, keyFn func(K) string, onEvict func(K
 		panic("keyFn must not be nil")
 	}
 	return &Cache[K, V]{
-		cap:     cap,
-		ll:      list.New(),
-		items:   make(map[K]*list.Element, cap),
-		keyFn:   keyFn,
-		onEvict: onEvict,
+		cap:      cap,
+		ll:       list.New(),
+		items:    make(map[K]*list.Element, cap),
+		evicting: make(map[K]chan struct{}),
+		keyFn:    keyFn,
+		onEvict:  onEvict,
 	}
 }
 
@@ -111,15 +113,22 @@ func (c *Cache[K, V]) Range() iter.Seq2[K, V] {
 // --- internal ---
 
 func (c *Cache[K, V]) get(key K) (V, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if ele, ok := c.items[key]; ok {
-		c.ll.MoveToFront(ele)
-		return ele.Value.(entry[K, V]).value, true
+	for {
+		c.mu.Lock()
+		if ele, ok := c.items[key]; ok {
+			c.ll.MoveToFront(ele)
+			value := ele.Value.(entry[K, V]).value
+			c.mu.Unlock()
+			return value, true
+		}
+		done := c.evicting[key]
+		c.mu.Unlock()
+		if done == nil {
+			var zero V
+			return zero, false
+		}
+		<-done
 	}
-	var zero V
-	return zero, false
 }
 
 func (c *Cache[K, V]) add(key K, value V) {
@@ -129,7 +138,15 @@ func (c *Cache[K, V]) add(key K, value V) {
 		evicted      bool
 	)
 
-	c.mu.Lock()
+	for {
+		c.mu.Lock()
+		done := c.evicting[key]
+		if done == nil {
+			break
+		}
+		c.mu.Unlock()
+		<-done
+	}
 
 	if ele, ok := c.items[key]; ok {
 		ele.Value = entry[K, V]{key: key, value: value}
@@ -149,6 +166,7 @@ func (c *Cache[K, V]) add(key K, value V) {
 			c.ll.Remove(back)
 
 			if c.onEvict != nil {
+				c.evicting[ent.key] = make(chan struct{})
 				evictedKey, evictedValue, evicted = ent.key, ent.value, true
 			}
 		}
@@ -156,8 +174,18 @@ func (c *Cache[K, V]) add(key K, value V) {
 
 	c.mu.Unlock()
 
-	// 回调放在锁外，避免死锁/重入问题
+	// Keep same-key reads blocked until the callback has finished. Persistence
+	// callbacks can therefore commit the evicted value before a miss reloads it.
 	if evicted {
-		c.onEvict(evictedKey, evictedValue)
+		func() {
+			defer func() {
+				c.mu.Lock()
+				done := c.evicting[evictedKey]
+				delete(c.evicting, evictedKey)
+				close(done)
+				c.mu.Unlock()
+			}()
+			c.onEvict(evictedKey, evictedValue)
+		}()
 	}
 }

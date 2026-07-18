@@ -121,32 +121,62 @@ func moderateDetectOne(bot *gotgbot.Bot, msg *gotgbot.Message) (replied bool) {
 
 var groupedDetectMap = &sync.Map{}
 
-func moderateDetectGrouped(bot *gotgbot.Bot, msg *gotgbot.Message) {
-	key := groupedMsgK{ChatId: msg.Chat.Id, GroupId: msg.MediaGroupId}
-	chn := make(chan *gotgbot.Message, 10)
-	existsChn, ok := groupedDetectMap.LoadOrStore(key, chn)
-	if ok {
-		close(chn)
-		existsChn.(chan *gotgbot.Message) <- msg
+type groupedDetector struct {
+	mu       sync.Mutex
+	lastSeen time.Time
+	replied  bool
+	expired  bool
+}
+
+func expireGroupedDetector(key groupedMsgK, detector *groupedDetector, idleTimeout time.Duration) {
+	timer := time.NewTimer(idleTimeout)
+	defer timer.Stop()
+	for range timer.C {
+		detector.mu.Lock()
+		remaining := idleTimeout - time.Since(detector.lastSeen)
+		if remaining > 0 {
+			detector.mu.Unlock()
+			timer.Reset(remaining)
+			continue
+		}
+		detector.expired = true
+		groupedDetectMap.CompareAndDelete(key, detector)
+		detector.mu.Unlock()
 		return
 	}
-	defer groupedDetectMap.Delete(key)
-	for {
-		select {
-		case <-time.After(10 * time.Second):
-			groupedDetectMap.Delete(key)
-			close(chn)
-			return
-		case msg, ok := <-chn:
-			if !ok {
-				return
-			}
-			if moderateDetectOne(bot, msg) {
-				return
-			}
-		}
-	}
+}
 
+func processGroupedNsfw(key groupedMsgK, msg *gotgbot.Message, idleTimeout time.Duration,
+	detect func(*gotgbot.Message) bool,
+) {
+	for {
+		candidate := &groupedDetector{lastSeen: time.Now()}
+		stored, loaded := groupedDetectMap.LoadOrStore(key, candidate)
+		detector := stored.(*groupedDetector)
+		if !loaded {
+			go expireGroupedDetector(key, detector, idleTimeout)
+		}
+		detector.mu.Lock()
+		if detector.expired {
+			detector.mu.Unlock()
+			groupedDetectMap.CompareAndDelete(key, detector)
+			continue
+		}
+		detector.lastSeen = time.Now()
+		if !detector.replied {
+			detector.replied = detect(msg)
+		}
+		detector.lastSeen = time.Now()
+		detector.mu.Unlock()
+		return
+	}
+}
+
+func moderateDetectGrouped(bot *gotgbot.Bot, msg *gotgbot.Message) {
+	key := groupedMsgK{ChatId: msg.Chat.Id, GroupId: msg.MediaGroupId}
+	processGroupedNsfw(key, msg, 10*time.Second, func(groupedMessage *gotgbot.Message) bool {
+		return moderateDetectOne(bot, groupedMessage)
+	})
 }
 
 func NsfwDetect(bot *gotgbot.Bot, ctx *ext.Context) error {

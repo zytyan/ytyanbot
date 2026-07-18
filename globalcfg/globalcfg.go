@@ -61,10 +61,10 @@ const (
 	DefaultDeepSeekBaseURL = "https://api.deepseek.com"
 )
 
-var gMu sync.Mutex
 var config atomic.Pointer[Config]
 
 type PtrLinkedCfg[T any] struct {
+	mu      sync.Mutex
 	cfg     *Config
 	ptr     *T
 	fn      func(new *Config) *T
@@ -72,14 +72,14 @@ type PtrLinkedCfg[T any] struct {
 }
 
 func (p *PtrLinkedCfg[T]) Get() *T {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	cfg := GetConfig()
 	if p.ptr == nil || p.cfg != cfg {
-		gMu.Lock()
-		defer gMu.Unlock()
 		if p.checker(p.cfg, cfg) {
-			p.cfg = cfg
-			p.ptr = p.fn(p.cfg)
+			p.ptr = p.fn(cfg)
 		}
+		p.cfg = cfg
 	}
 	return p.ptr
 }

@@ -59,6 +59,7 @@ func (d *dlKey) String() string {
 
 type DlResult struct {
 	uploadFileOnce sync.Once
+	uploadErr      error
 	cleanup        func()
 
 	file string
@@ -237,6 +238,21 @@ func sendAudio(bot *gotgbot.Bot, result *DlResult, user *gotgbot.User, msgId, ch
 	})
 }
 
+func deliverDownloadedResult(result *DlResult, upload, resend func() error) error {
+	first := false
+	result.uploadFileOnce.Do(func() {
+		first = true
+		result.uploadErr = upload()
+	})
+	if result.uploadErr != nil {
+		return result.uploadErr
+	}
+	if first {
+		return nil
+	}
+	return resend()
+}
+
 func downloadMedia(bot *gotgbot.Bot, key *dlKey, user *gotgbot.User, msgId, chatId int64) (err error) {
 	msgOpt := &gotgbot.SendMessageOpts{
 		ReplyParameters: MakeReplyToMsgID(msgId),
@@ -263,29 +279,47 @@ func downloadMedia(bot *gotgbot.Bot, key *dlKey, user *gotgbot.User, msgId, chat
 		_, err = bot.SendMessage(chatId, "下载过程中遇到错误: "+err.Error(), msgOpt)
 		return err
 	}
-	result.uploadFileOnce.Do(func() {
-		defer result.cleanup()
+	err = deliverDownloadedResult(result, func() error {
+		if result.cleanup != nil {
+			defer result.cleanup()
+		}
 		var sent *gotgbot.Message
 		if key.AudioOnly {
 			sent, err = sendAudio(bot, result, user, msgId, chatId)
-			if err == nil && sent != nil && sent.Audio != nil {
-				result.FileID = sent.Audio.FileId
+			if err != nil {
+				return err
 			}
+			if sent == nil || sent.Audio == nil || sent.Audio.FileId == "" {
+				return errors.New("Telegram 上传音频后未返回文件 ID")
+			}
+			result.FileID = sent.Audio.FileId
 		} else {
 			sent, err = sendVideo(bot, result, user, msgId, chatId)
-			if err == nil && sent != nil && sent.Video != nil {
-				result.FileID = sent.Video.FileId
+			if err != nil {
+				return err
 			}
-		}
-		if err != nil {
-			log.Warn("download send media error", "err", err)
-			return
+			if sent == nil || sent.Video == nil || sent.Video.FileId == "" {
+				return errors.New("Telegram 上传视频后未返回文件 ID")
+			}
+			result.FileID = sent.Video.FileId
 		}
 		if saveErr := result.Save(context.Background(), g.Q); saveErr != nil {
 			log.Warn("save download result to database error", "err", saveErr)
 		}
+		return nil
+	}, func() error {
+		if key.AudioOnly {
+			_, err = sendAudio(bot, result, user, msgId, chatId)
+		} else {
+			_, err = sendVideo(bot, result, user, msgId, chatId)
+		}
+		if err == nil {
+			_ = g.Q.IncYtDlUploadCount(context.Background(), result.FileID)
+		}
+		return err
 	})
 	if err != nil {
+		log.Warn("download send media error", "err", err)
 		_, _ = bot.SendMessage(chatId, "下载失败，遇到错误: "+err.Error(), msgOpt)
 		return err
 	}

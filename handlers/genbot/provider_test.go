@@ -411,6 +411,45 @@ func createV2TestSession(t *testing.T, chatID int64, provider, model string) q.G
 	return sessionFromV2(row)
 }
 
+func TestGeminiGetSessionRejectsCrossChatExplicitSessionID(t *testing.T) {
+	tests := []struct {
+		name   string
+		cached bool
+	}{
+		{name: "database"},
+		{name: "cache", cached: true},
+	}
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			foreignChatID := int64(-930100 - index*2)
+			currentChatID := foreignChatID - 1
+			foreign := createV2TestSession(t, foreignChatID, ProviderGemini, ModelGeminiFlash)
+			if test.cached {
+				geminiSessions.mu.Lock()
+				geminiSessions.sidToSess[foreign.ID] = &GeminiSession{
+					GeminiSession: foreign,
+					Provider:      ProviderGemini,
+					Model:         ModelGeminiFlash,
+				}
+				geminiSessions.mu.Unlock()
+			}
+			t.Cleanup(func() { invalidateSession(foreign.ID) })
+
+			msg := &gotgbot.Message{
+				MessageId: int64(930100 + index),
+				Chat: gotgbot.Chat{
+					Id: currentChatID, Type: "private", FirstName: "requester",
+				},
+			}
+			session := GeminiGetSession(context.Background(), msg, false, false, foreign.ID)
+			require.NotNil(t, session)
+			t.Cleanup(func() { invalidateSession(session.ID) })
+			require.NotEqual(t, foreign.ID, session.ID)
+			require.Equal(t, currentChatID, session.ChatID)
+		})
+	}
+}
+
 func v2TestUserContent(sessionID, chatID, msgID int64, text string) q.GeminiContent {
 	content := testContent("text", text)
 	content.SessionID = sessionID

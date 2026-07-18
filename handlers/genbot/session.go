@@ -543,7 +543,7 @@ func GeminiGetSession(ctx context.Context, msg *gotgbot.Message, createNewSessio
 			sessionId = mentionSessionId
 		}
 		if err == nil {
-			if sess, ok := geminiSessions.sidToSess[sessionId]; ok {
+			if sess, ok := geminiSessions.sidToSess[sessionId]; ok && sess.ChatID == msg.Chat.Id {
 				return sess
 			}
 		}
@@ -555,6 +555,9 @@ func GeminiGetSession(ctx context.Context, msg *gotgbot.Message, createNewSessio
 				goto create
 			}
 			return nil
+		}
+		if storedSession.ChatID != msg.Chat.Id {
+			goto create
 		}
 		session.GeminiSession = sessionFromV2(storedSession)
 		session.UpdateTime = time.Unix(storedSession.UpdatedAt, 0)

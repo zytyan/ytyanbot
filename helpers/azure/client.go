@@ -2,15 +2,19 @@ package azure
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	jsoniter "github.com/json-iterator/go"
 )
+
+const defaultRequestTimeout = 30 * time.Second
 
 //goland:noinspection GoUnusedConst
 const (
@@ -33,18 +37,21 @@ type Client struct {
 }
 
 func NewClient(endpoint string, apiKey string, path string) *Client {
-	return &Client{apiKey: apiKey, endpoint: endpoint, path: path}
+	return &Client{
+		client: http.Client{Timeout: defaultRequestTimeout},
+		apiKey: apiKey, endpoint: endpoint, path: path,
+	}
 }
 
-func (c *Client) reqWithAuth(method, contentType string) *http.Request {
+func (c *Client) reqWithAuth(ctx context.Context, method, contentType string) (*http.Request, error) {
 	urlPath := fmt.Sprintf("%s%s", c.endpoint, c.path)
-	request, err := http.NewRequest(method, urlPath, nil)
+	request, err := http.NewRequestWithContext(ctx, method, urlPath, nil)
 	if err != nil {
-		panic(err) // 理论上不会有问题
+		return nil, err
 	}
 	request.Header.Set("Content-Type", contentType)
 	request.Header.Add("Ocp-Apim-Subscription-Key", c.apiKey)
-	return request
+	return request, nil
 }
 
 func unmarshalResponse(resp *http.Response, v any) error {
@@ -84,12 +91,19 @@ type Moderator struct {
 }
 
 func (m *Moderator) EvalFile(path string) (*ModeratorResult, error) {
+	return m.EvalFileContext(context.Background(), path)
+}
+
+func (m *Moderator) EvalFileContext(ctx context.Context, path string) (*ModeratorResult, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-	req := m.reqWithAuth(http.MethodPost, "image/jpeg")
+	req, err := m.reqWithAuth(ctx, http.MethodPost, "image/jpeg")
+	if err != nil {
+		return nil, err
+	}
 	req.Body = file
 	resp, err := m.client.Do(req)
 	if err != nil {
@@ -137,23 +151,36 @@ type OcrResult struct {
 }
 
 func (o *Ocr) OcrFile(path string) (*OcrResult, error) {
+	return o.OcrFileContext(context.Background(), path)
+}
+
+func (o *Ocr) OcrFileContext(ctx context.Context, path string) (*OcrResult, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	stat, err := file.Stat()
 	if err != nil {
+		_ = file.Close()
 		return nil, err
 	}
-	return o.ocr(file, stat.Size())
+	return o.ocr(ctx, file, stat.Size())
 }
 
 func (o *Ocr) OcrData(data []byte) (*OcrResult, error) {
-	return o.ocr(io.NopCloser(bytes.NewReader(data)), int64(len(data)))
+	return o.OcrDataContext(context.Background(), data)
 }
 
-func (o *Ocr) ocr(body io.ReadCloser, contentLength int64) (*OcrResult, error) {
-	req := o.reqWithAuth(http.MethodPost, "image/jpeg")
+func (o *Ocr) OcrDataContext(ctx context.Context, data []byte) (*OcrResult, error) {
+	return o.ocr(ctx, io.NopCloser(bytes.NewReader(data)), int64(len(data)))
+}
+
+func (o *Ocr) ocr(ctx context.Context, body io.ReadCloser, contentLength int64) (*OcrResult, error) {
+	defer body.Close()
+	req, err := o.reqWithAuth(ctx, http.MethodPost, "image/jpeg")
+	if err != nil {
+		return nil, err
+	}
 	req.Body = body
 	req.ContentLength = contentLength
 	q := req.URL.Query()
@@ -240,15 +267,26 @@ type ModeratorV2 struct {
 }
 
 func (m *ModeratorV2) EvalFile(path string) (*ModeratorV2Result, error) {
+	return m.EvalFileContext(context.Background(), path)
+}
+
+func (m *ModeratorV2) EvalFileContext(ctx context.Context, path string) (*ModeratorV2Result, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	return m.EvalData(data)
+	return m.EvalDataContext(ctx, data)
 }
 
 func (m *ModeratorV2) EvalData(data []byte) (*ModeratorV2Result, error) {
-	req := m.reqWithAuth(http.MethodPost, "application/json")
+	return m.EvalDataContext(context.Background(), data)
+}
+
+func (m *ModeratorV2) EvalDataContext(ctx context.Context, data []byte) (*ModeratorV2Result, error) {
+	req, err := m.reqWithAuth(ctx, http.MethodPost, "application/json")
+	if err != nil {
+		return nil, err
+	}
 	b64Data := base64.StdEncoding.EncodeToString(data)
 	param := moderatorV2Param{
 		Categories: m.Categories,

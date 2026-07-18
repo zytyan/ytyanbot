@@ -33,7 +33,7 @@ func ocrMsg(bot *gotgbot.Bot, file *gotgbot.PhotoSize) (string, error) {
 		if err != nil {
 			return nil, err
 		}
-		return g.Ocr().OcrData(data)
+		return g.Ocr().OcrDataContext(ctx, data)
 	})
 	if err != nil {
 		logger.Warn("ocr file error", "err", err)
@@ -65,7 +65,7 @@ func moderatorMsg(bot *gotgbot.Bot, file *gotgbot.PhotoSize) (*azure.ModeratorV2
 		if err != nil {
 			return nil, err
 		}
-		return g.Moderator().EvalData(data)
+		return g.Moderator().EvalDataContext(ctx, data)
 	})
 	if err != nil {
 		logger.Warn("moderator file error", "err", err)

@@ -15,7 +15,6 @@ ocr:
   features: "Read"
 
 
-qr-scan-url: http://localhost:4023/scanqr
 tg-api-url: http://localhost:8081
 drop-pending-updates: false
 gemini-key: ABCDEFGHIJKLMNOPQRST

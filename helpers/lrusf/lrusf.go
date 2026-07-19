@@ -92,12 +92,6 @@ func (c *Cache[K, V]) Remove(key K) {
 	}
 }
 
-func (c *Cache[K, V]) Len() int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return len(c.items)
-}
-
 func (c *Cache[K, V]) Range() iter.Seq2[K, V] {
 	return func(yield func(K, V) bool) {
 		c.mu.Lock()

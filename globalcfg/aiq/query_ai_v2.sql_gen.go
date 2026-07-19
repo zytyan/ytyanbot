@@ -263,27 +263,6 @@ func (q *Queries) GetAIChatSettings(ctx context.Context, chatID int64) (AiChatSe
 	return i, err
 }
 
-const getAIMessage = `-- name: GetAIMessage :one
-SELECT chat_id, msg_id, sent_at, user_id, username, atable_username, msg_type, text, reply_to_msg_id FROM ai_messages WHERE chat_id=? AND msg_id=?
-`
-
-func (q *Queries) GetAIMessage(ctx context.Context, chatID int64, msgID int64) (AiMessage, error) {
-	row := q.queryRow(ctx, q.getAIMessageStmt, getAIMessage, chatID, msgID)
-	var i AiMessage
-	err := row.Scan(
-		&i.ChatID,
-		&i.MsgID,
-		&i.SentAt,
-		&i.UserID,
-		&i.Username,
-		&i.AtableUsername,
-		&i.MsgType,
-		&i.Text,
-		&i.ReplyToMsgID,
-	)
-	return i, err
-}
-
 const getAIMigrationStats = `-- name: GetAIMigrationStats :one
 SELECT
   CAST((SELECT COUNT(*) FROM ai_sessions) AS INTEGER) AS sessions,
@@ -1000,17 +979,6 @@ func (q *Queries) SetAISessionModel(ctx context.Context, provider string, model 
 		updatedAt,
 		sessionID,
 	)
-	return err
-}
-
-const setAISessionStatus = `-- name: SetAISessionStatus :exec
-UPDATE ai_sessions
-SET status=?1, updated_at=?2
-WHERE id=?3
-`
-
-func (q *Queries) SetAISessionStatus(ctx context.Context, status string, updatedAt int64, sessionID int64) error {
-	_, err := q.exec(ctx, q.setAISessionStatusStmt, setAISessionStatus, status, updatedAt, sessionID)
 	return err
 }
 

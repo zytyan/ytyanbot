@@ -116,10 +116,6 @@ func NewPartFromText(text string) *Part {
 	return &Part{Text: text}
 }
 
-func NewPartFromBytes(data []byte, mimeType string) *Part {
-	return &Part{InlineData: &Blob{Data: data, MIMEType: mimeType}}
-}
-
 func NewContentFromText(text, role string) *Content {
 	if role == "" {
 		role = RoleUser

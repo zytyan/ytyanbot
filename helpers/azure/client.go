@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -18,7 +17,6 @@ const defaultRequestTimeout = 30 * time.Second
 
 //goland:noinspection GoUnusedConst
 const (
-	ContentModeratorPath   = "/contentmoderator/moderate/v1.0/ProcessImage/Evaluate"
 	ContentModeratorV2Path = "/contentsafety/image:analyze?api-version=2024-09-01"
 	OcrPath                = "/computervision/imageanalysis:analyze"
 )
@@ -70,50 +68,6 @@ func unmarshalResponse(resp *http.Response, v any) error {
 	return nil
 }
 
-type ModeratorResult struct {
-	ResponseError
-	AdultClassificationScore float64 `json:"AdultClassificationScore"`
-	IsImageAdultClassified   bool    `json:"IsImageAdultClassified"`
-	RacyClassificationScore  float64 `json:"RacyClassificationScore"`
-	IsImageRacyClassified    bool    `json:"IsImageRacyClassified"`
-	Result                   bool    `json:"Result"`
-	AdvancedInfo             []any   `json:"AdvancedInfo"`
-	Status                   struct {
-		Code        int    `json:"Code"`
-		Description string `json:"Description"`
-		Exception   any    `json:"Exception"`
-	} `json:"Status"`
-	TrackingID string `json:"TrackingId"`
-}
-
-type Moderator struct {
-	Client
-}
-
-func (m *Moderator) EvalFile(path string) (*ModeratorResult, error) {
-	return m.EvalFileContext(context.Background(), path)
-}
-
-func (m *Moderator) EvalFileContext(ctx context.Context, path string) (*ModeratorResult, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	req, err := m.reqWithAuth(ctx, http.MethodPost, "image/jpeg")
-	if err != nil {
-		return nil, err
-	}
-	req.Body = file
-	resp, err := m.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	res := &ModeratorResult{}
-	err = unmarshalResponse(resp, res)
-	return res, err
-}
-
 type Ocr struct {
 	Client
 	ApiVer   string
@@ -150,27 +104,6 @@ type OcrResult struct {
 	} `json:"readResult,omitempty"`
 }
 
-func (o *Ocr) OcrFile(path string) (*OcrResult, error) {
-	return o.OcrFileContext(context.Background(), path)
-}
-
-func (o *Ocr) OcrFileContext(ctx context.Context, path string) (*OcrResult, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	stat, err := file.Stat()
-	if err != nil {
-		_ = file.Close()
-		return nil, err
-	}
-	return o.ocr(ctx, file, stat.Size())
-}
-
-func (o *Ocr) OcrData(data []byte) (*OcrResult, error) {
-	return o.OcrDataContext(context.Background(), data)
-}
-
 func (o *Ocr) OcrDataContext(ctx context.Context, data []byte) (*OcrResult, error) {
 	return o.ocr(ctx, io.NopCloser(bytes.NewReader(data)), int64(len(data)))
 }
@@ -201,20 +134,6 @@ func (o *Ocr) ocr(ctx context.Context, body io.ReadCloser, contentLength int64) 
 	return res, err
 }
 
-type Error struct {
-	Error struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	} `json:"error"`
-}
-type ImageAnalysisResult struct {
-	ResponseError
-	CategoriesAnalysis []struct {
-		Category string `json:"category"`
-		Severity int    `json:"severity"`
-	} `json:"categoriesAnalysis"`
-}
-
 func (r *ResponseError) HasError() bool {
 	return r.Error.Code == "" || r.Error.Code == "0"
 }
@@ -239,10 +158,7 @@ func (r *OcrResult) Text() string {
 
 //goland:noinspection GoUnusedConst
 const (
-	ModerateV2CatHate     = "Hate"
-	ModerateV2CatSelfHarm = "SelfHarm"
-	ModerateV2CatViolence = "Violence"
-	ModerateV2CatSexual   = "Sexual"
+	ModerateV2CatSexual = "Sexual"
 )
 
 type ModeratorV2Result struct {
@@ -264,22 +180,6 @@ type ModeratorV2 struct {
 	Client
 	Categories []string `json:"categories"`
 	OutputType string   `json:"outputType"`
-}
-
-func (m *ModeratorV2) EvalFile(path string) (*ModeratorV2Result, error) {
-	return m.EvalFileContext(context.Background(), path)
-}
-
-func (m *ModeratorV2) EvalFileContext(ctx context.Context, path string) (*ModeratorV2Result, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return m.EvalDataContext(ctx, data)
-}
-
-func (m *ModeratorV2) EvalData(data []byte) (*ModeratorV2Result, error) {
-	return m.EvalDataContext(context.Background(), data)
 }
 
 func (m *ModeratorV2) EvalDataContext(ctx context.Context, data []byte) (*ModeratorV2Result, error) {

@@ -42,7 +42,6 @@ type Config struct {
 	AIChats             []int64   `koanf:"ai-chats"`
 	ContentModerator    Azure     `koanf:"content-moderator"`
 	Ocr                 OcrConfig `koanf:"ocr"`
-	QrScanUrl           string    `koanf:"qr-scan-url"`
 	TgApiUrl            string    `koanf:"tg-api-url"`
 	DropPendingUpdates  bool      `koanf:"drop-pending-updates"`
 	LogLevel            int8      `koanf:"log-level"`
@@ -52,9 +51,6 @@ type Config struct {
 	GeminiExplicitCache *bool     `koanf:"gemini-explicit-cache"`
 	DeepSeekKey         string    `koanf:"deepseek-key"`
 	DeepSeekBaseURL     string    `koanf:"deepseek-base-url"`
-
-	LogFile  string `koanf:"log-file"`
-	NoStdout bool   `koanf:"no-stdout"`
 }
 
 const (

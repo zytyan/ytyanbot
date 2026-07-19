@@ -26,7 +26,6 @@ func TestLoadConfig(t *testing.T) {
 	as.Equal("", cfg.Ocr.Language)
 	as.Equal("Read", cfg.Ocr.Features)
 
-	as.Equal("http://localhost:4023/scanqr", cfg.QrScanUrl)
 	as.Equal("http://localhost:8081", cfg.TgApiUrl)
 	as.False(cfg.DropPendingUpdates)
 	as.Equal("ABCDEFGHIJKLMNOPQRST", cfg.GeminiKey)

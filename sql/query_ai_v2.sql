@@ -61,11 +61,6 @@ SET provider=sqlc.arg(provider), model=sqlc.arg(model), history_rebuild_lossy=1,
     updated_at=sqlc.arg(updated_at)
 WHERE id=sqlc.arg(session_id);
 
--- name: SetAISessionStatus :exec
-UPDATE ai_sessions
-SET status=sqlc.arg(status), updated_at=sqlc.arg(updated_at)
-WHERE id=sqlc.arg(session_id);
-
 -- name: TouchAISession :exec
 UPDATE ai_sessions SET updated_at=sqlc.arg(updated_at) WHERE id=sqlc.arg(session_id);
 
@@ -89,9 +84,6 @@ VALUES (sqlc.arg(chat_id), sqlc.arg(msg_id), sqlc.arg(sent_at), sqlc.arg(user_id
         sqlc.arg(username), sqlc.narg(atable_username), sqlc.arg(msg_type), sqlc.narg(text),
         sqlc.narg(reply_to_msg_id))
 ON CONFLICT(chat_id, msg_id) DO NOTHING;
-
--- name: GetAIMessage :one
-SELECT * FROM ai_messages WHERE chat_id=? AND msg_id=?;
 
 -- name: InsertMediaObject :exec
 INSERT INTO media_objects(sha256, relative_path, byte_size, mime_type, created_at)

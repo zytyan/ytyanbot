@@ -15,6 +15,7 @@ import (
 )
 
 const (
+	ModelGemini37Flash   = "gemini-3.7-flash"
 	ModelGeminiFlash     = "gemini-3-flash-preview"
 	ModelGeminiFlashLite = "gemini-3.1-flash-lite"
 	ModelDeepSeekFlash   = "deepseek-v4-flash"
@@ -62,6 +63,7 @@ type modelOption struct {
 }
 
 var modelOptions = []modelOption{
+	{Model: ModelGemini37Flash, Label: "Gemini 3.7 Flash", Provider: ProviderGemini},
 	{Model: ModelGeminiFlash, Label: "Gemini 3 Flash Preview", Provider: ProviderGemini},
 	{Model: ModelGeminiFlashLite, Label: "Gemini 3.1 Flash-Lite", Provider: ProviderGemini},
 	{Model: ModelDeepSeekFlash, Label: "DeepSeek V4 Flash", Provider: ProviderDeepSeek},

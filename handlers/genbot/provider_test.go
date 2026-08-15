@@ -638,19 +638,32 @@ func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error)
 
 func TestModelKeyboardMarksCurrent(t *testing.T) {
 	keyboard := modelKeyboard(ModelDeepSeekFlash, 12345)
-	require.Len(t, keyboard.InlineKeyboard, 3)
-	require.True(t, strings.HasPrefix(keyboard.InlineKeyboard[2][0].Text, "✅"))
+	require.Len(t, keyboard.InlineKeyboard, 4)
+	selected := 0
 	for _, row := range keyboard.InlineKeyboard {
+		if strings.HasPrefix(row[0].Text, "✅") {
+			selected++
+			require.Contains(t, row[0].Text, "DeepSeek V4 Flash")
+		}
 		require.LessOrEqual(t, len(row[0].CallbackData), 64)
 		sessionID, model, ok := parseModelCallback(row[0].CallbackData)
 		require.True(t, ok)
 		require.Equal(t, int64(12345), sessionID)
 		require.NotEmpty(t, model)
 	}
+	require.Equal(t, 1, selected)
 	legacySessionID, legacyModel, ok := parseModelCallback(modelCallbackPrefix + ModelGeminiFlash)
 	require.True(t, ok)
 	require.Zero(t, legacySessionID)
 	require.Equal(t, ModelGeminiFlash, legacyModel)
+}
+
+func TestGemini37FlashModelOption(t *testing.T) {
+	option, ok := getModelOption(ModelGemini37Flash)
+	require.True(t, ok)
+	require.Equal(t, "gemini-3.7-flash", option.Model)
+	require.Equal(t, "Gemini 3.7 Flash", option.Label)
+	require.Equal(t, ProviderGemini, option.Provider)
 }
 
 func TestGemini3FlashDefaultsToLowThinkingWithoutOverridingExplicitLevel(t *testing.T) {

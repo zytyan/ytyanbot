@@ -10,3 +10,4 @@ __pycache__
 /http/frontend/dist
 /http/frontend/node_modules
 /.codex
+bili_cookies.json

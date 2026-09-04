@@ -85,6 +85,9 @@ func IsGeminiReq(msg *gotgbot.Message) bool {
 	if strings.HasPrefix(text, "/") {
 		return false
 	}
+	if len(text) > 1000 {
+		return false
+	}
 	if strings.Contains(text, "@new") {
 		return true
 	}

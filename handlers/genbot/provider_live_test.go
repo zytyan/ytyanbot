@@ -471,13 +471,7 @@ func TestLiveDeepSeekVisionImage(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, messages, 4)
 			require.True(t, deepSeekMessageHasImage(messages[3]))
-			request := deepSeekRequest{
-				Model: model, Messages: messages,
-				MaxTokens: 64,
-				Thinking:  &deepSeekThinking{Type: "disabled"},
-			}
-			result, err := callDeepSeek(context.Background(), &http.Client{Timeout: 15 * time.Minute},
-				g.GetConfig().DeepSeekBaseURL, g.GetConfig().DeepSeekKey, request)
+			result, err := generateDeepSeek(context.Background(), session, "system", session.prepareRequestWindow())
 			require.NoError(t, err)
 			require.NotEmpty(t, result.DisplayText)
 			require.Contains(t, result.DisplayText, "红上蓝下")
@@ -490,14 +484,15 @@ func TestLiveDeepSeekVisionImage(t *testing.T) {
 
 func liveVisionTestImage(t *testing.T) []byte {
 	t.Helper()
-	const size = 64
-	canvas := image.NewRGBA(image.Rect(0, 0, size, size))
-	for y := range size {
+	const width = 1280
+	const height = 931
+	canvas := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := range height {
 		fill := color.RGBA{B: 255, A: 255}
-		if y < size/2 {
+		if y < height/2 {
 			fill = color.RGBA{R: 255, A: 255}
 		}
-		for x := range size {
+		for x := range width {
 			canvas.SetRGBA(x, y, fill)
 		}
 	}

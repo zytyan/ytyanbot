@@ -259,10 +259,7 @@ func generateDeepSeek(ctx context.Context, session *GeminiSession, systemPrompt 
 	if cfg.DeepSeekKey == "" {
 		return nil, errors.New("DeepSeek API Key 未配置")
 	}
-	requestSession := &GeminiSession{
-		Contents: window.Contents, AssistantPayloads: session.AssistantPayloads,
-		HistoryRebuildLossy: session.HistoryRebuildLossy,
-	}
+	requestSession := deepSeekRequestSession(session, window)
 	messages, err := requestSession.ToDeepSeekMessages(systemPrompt)
 	if err != nil {
 		return nil, err
@@ -290,6 +287,13 @@ func generateDeepSeek(ctx context.Context, session *GeminiSession, systemPrompt 
 		}
 	}
 	return nil, err
+}
+
+func deepSeekRequestSession(session *GeminiSession, window aiRequestWindow) *GeminiSession {
+	return &GeminiSession{
+		Contents: window.Contents, AssistantPayloads: session.AssistantPayloads,
+		HistoryRebuildLossy: session.HistoryRebuildLossy, Model: session.Model,
+	}
 }
 
 func callDeepSeek(ctx context.Context, client *http.Client, baseURL, apiKey string, request deepSeekRequest) (*AIResult, error) {

@@ -91,6 +91,18 @@ func TestDeepSeekVisionModelRoutesImageInput(t *testing.T) {
 	require.True(t, deepSeekMessageHasImage(messages[1]))
 }
 
+func TestDeepSeekRequestSessionRetainsMultimodalModel(t *testing.T) {
+	photo := testContent("photo", "caption")
+	photo.Blob = []byte("image")
+	photo.MimeType = sql.NullString{String: "image/jpeg", Valid: true}
+	session := &GeminiSession{Model: ModelDeepSeek41Flash, TmpContents: []q.GeminiContent{photo}}
+	window := session.prepareRequestWindow()
+
+	messages, err := deepSeekRequestSession(session, window).ToDeepSeekMessages("system")
+	require.NoError(t, err)
+	require.True(t, deepSeekMessageHasImage(messages[1]))
+}
+
 func TestDeepSeekVisionCombinesPhotoAndFollowupText(t *testing.T) {
 	photo := testContent("photo", "")
 	photo.MsgID = 1

@@ -448,40 +448,44 @@ func TestLiveDeepSeekVisionImage(t *testing.T) {
 	requireLiveAI(t)
 	require.NotEmpty(t, g.GetConfig().DeepSeekKey)
 	image := liveVisionTestImage(t)
-	session := &GeminiSession{Model: ModelDeepSeekVision, TmpContents: []q.GeminiContent{
-		{
-			MsgID: 1, Role: genai.RoleUser, Username: "vision tester", MsgType: "photo",
-			SentTime: q.UnixTime{Time: time.Unix(1, 0)}, Blob: image,
-			MimeType: sql.NullString{String: "image/png", Valid: true},
-		},
-		{
-			MsgID: 2, Role: genai.RoleModel, Username: "bot", MsgType: "text",
-			SentTime: q.UnixTime{Time: time.Unix(2, 0)},
-			Text:     sql.NullString{String: "请继续提问。", Valid: true},
-		},
-		{
-			MsgID: 3, Role: genai.RoleUser, Username: "vision tester", MsgType: "text",
-			SentTime: q.UnixTime{Time: time.Unix(3, 0)},
-			Text:     sql.NullString{String: "图片上半部分是否为红色、下半部分是否为蓝色？只回答 红上蓝下。", Valid: true},
-		},
-	}}
-	messages, err := session.ToDeepSeekMessages("system")
-	require.NoError(t, err)
-	require.Len(t, messages, 4)
-	require.True(t, deepSeekMessageHasImage(messages[3]))
-	request := deepSeekRequest{
-		Model: ModelDeepSeekVision, Messages: messages,
-		MaxTokens: 64,
-		Thinking:  &deepSeekThinking{Type: "disabled"},
+	for _, model := range []string{ModelDeepSeekVision, ModelDeepSeek41Flash} {
+		t.Run(model, func(t *testing.T) {
+			session := &GeminiSession{Model: model, TmpContents: []q.GeminiContent{
+				{
+					MsgID: 1, Role: genai.RoleUser, Username: "vision tester", MsgType: "photo",
+					SentTime: q.UnixTime{Time: time.Unix(1, 0)}, Blob: image,
+					MimeType: sql.NullString{String: "image/png", Valid: true},
+				},
+				{
+					MsgID: 2, Role: genai.RoleModel, Username: "bot", MsgType: "text",
+					SentTime: q.UnixTime{Time: time.Unix(2, 0)},
+					Text:     sql.NullString{String: "请继续提问。", Valid: true},
+				},
+				{
+					MsgID: 3, Role: genai.RoleUser, Username: "vision tester", MsgType: "text",
+					SentTime: q.UnixTime{Time: time.Unix(3, 0)},
+					Text:     sql.NullString{String: "图片上半部分是否为红色、下半部分是否为蓝色？只回答 红上蓝下。", Valid: true},
+				},
+			}}
+			messages, err := session.ToDeepSeekMessages("system")
+			require.NoError(t, err)
+			require.Len(t, messages, 4)
+			require.True(t, deepSeekMessageHasImage(messages[3]))
+			request := deepSeekRequest{
+				Model: model, Messages: messages,
+				MaxTokens: 64,
+				Thinking:  &deepSeekThinking{Type: "disabled"},
+			}
+			result, err := callDeepSeek(context.Background(), &http.Client{Timeout: 15 * time.Minute},
+				g.GetConfig().DeepSeekBaseURL, g.GetConfig().DeepSeekKey, request)
+			require.NoError(t, err)
+			require.NotEmpty(t, result.DisplayText)
+			require.Contains(t, result.DisplayText, "红上蓝下")
+			require.Greater(t, result.Usage.InputTokens, int64(0))
+			t.Logf("deepseek vision accepted image: input_tokens=%d output_tokens=%d response=%q",
+				result.Usage.InputTokens, result.Usage.OutputTokens, result.DisplayText)
+		})
 	}
-	result, err := callDeepSeek(context.Background(), &http.Client{Timeout: 15 * time.Minute},
-		g.GetConfig().DeepSeekBaseURL, g.GetConfig().DeepSeekKey, request)
-	require.NoError(t, err)
-	require.NotEmpty(t, result.DisplayText)
-	require.Contains(t, result.DisplayText, "红上蓝下")
-	require.Greater(t, result.Usage.InputTokens, int64(0))
-	t.Logf("deepseek vision accepted image: input_tokens=%d output_tokens=%d response=%q",
-		result.Usage.InputTokens, result.Usage.OutputTokens, result.DisplayText)
 }
 
 func liveVisionTestImage(t *testing.T) []byte {

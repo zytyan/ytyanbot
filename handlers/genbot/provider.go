@@ -70,7 +70,7 @@ var modelOptions = []modelOption{
 	{Model: ModelGeminiFlashLite, Label: "Gemini 3.1 Flash-Lite", Provider: ProviderGemini},
 	{Model: ModelDeepSeekFlash, Label: "DeepSeek V4 Flash", Provider: ProviderDeepSeek},
 	{Model: ModelDeepSeekVision, Label: "DeepSeek V4 Flash Vision（图片）", Provider: ProviderDeepSeek},
-	{Model: ModelDeepSeek41Flash, Label: "DeepSeek V4.1 Flash（内测）", Provider: ProviderDeepSeek},
+	{Model: ModelDeepSeek41Flash, Label: "DeepSeek V4.1 Flash（多模态内测）", Provider: ProviderDeepSeek},
 }
 
 func getModelOption(model string) (modelOption, bool) {
@@ -225,7 +225,7 @@ func (m *deepSeekMessage) UnmarshalJSON(data []byte) error {
 }
 
 func deepSeekSupportsImages(model string) bool {
-	return model == ModelDeepSeekVision
+	return model == ModelDeepSeekVision || model == ModelDeepSeek41Flash
 }
 
 type deepSeekRequest struct {

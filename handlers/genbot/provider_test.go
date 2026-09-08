@@ -87,8 +87,8 @@ func TestDeepSeekVisionModelRoutesImageInput(t *testing.T) {
 	preview := &GeminiSession{Model: ModelDeepSeek41Flash, TmpContents: []q.GeminiContent{photo}}
 	messages, err = preview.ToDeepSeekMessages("system")
 	require.NoError(t, err)
-	require.Contains(t, messages[1].Content, "[图片]")
-	require.Empty(t, messages[1].ContentParts)
+	require.Len(t, messages[1].ContentParts, 2)
+	require.True(t, deepSeekMessageHasImage(messages[1]))
 }
 
 func TestDeepSeekVisionCombinesPhotoAndFollowupText(t *testing.T) {

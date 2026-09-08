@@ -19,6 +19,7 @@ const (
 	ModelGeminiFlash     = "gemini-3-flash-preview"
 	ModelGeminiFlashLite = "gemini-3.1-flash-lite"
 	ModelDeepSeekFlash   = "deepseek-v4-flash"
+	ModelDeepSeek41Flash = "deepseek-v4.1-flash-expires-on-0910"
 	defaultAIModel       = ModelGeminiFlash
 )
 
@@ -67,6 +68,7 @@ var modelOptions = []modelOption{
 	{Model: ModelGeminiFlash, Label: "Gemini 3 Flash Preview", Provider: ProviderGemini},
 	{Model: ModelGeminiFlashLite, Label: "Gemini 3.1 Flash-Lite", Provider: ProviderGemini},
 	{Model: ModelDeepSeekFlash, Label: "DeepSeek V4 Flash", Provider: ProviderDeepSeek},
+	{Model: ModelDeepSeek41Flash, Label: "DeepSeek V4.1 Flash（内测）", Provider: ProviderDeepSeek},
 }
 
 func getModelOption(model string) (modelOption, bool) {
@@ -157,30 +159,71 @@ func resultFromGeminiResponse(response *genai.GenerateContentResponse) (*AIResul
 }
 
 type deepSeekMessage struct {
-	Role             string          `json:"role"`
-	Content          string          `json:"content"`
-	ReasoningContent string          `json:"reasoning_content,omitempty"`
-	ToolCalls        json.RawMessage `json:"tool_calls,omitempty"`
+	Role             string                `json:"role"`
+	Content          string                `json:"-"`
+	ContentParts     []deepSeekContentPart `json:"-"`
+	ReasoningContent string                `json:"reasoning_content,omitempty"`
+	ToolCalls        json.RawMessage       `json:"tool_calls,omitempty"`
 	raw              json.RawMessage
+}
+
+type deepSeekContentPart struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	ImageURL *struct {
+		URL string `json:"url"`
+	} `json:"image_url,omitempty"`
 }
 
 func (m deepSeekMessage) MarshalJSON() ([]byte, error) {
 	if len(m.raw) > 0 {
 		return append([]byte(nil), m.raw...), nil
 	}
-	type wireMessage deepSeekMessage
-	return json.Marshal(wireMessage(m))
+	content, err := json.Marshal(m.Content)
+	if err != nil {
+		return nil, err
+	}
+	if m.ContentParts != nil {
+		content, err = json.Marshal(m.ContentParts)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return json.Marshal(struct {
+		Role             string          `json:"role"`
+		Content          json.RawMessage `json:"content"`
+		ReasoningContent string          `json:"reasoning_content,omitempty"`
+		ToolCalls        json.RawMessage `json:"tool_calls,omitempty"`
+	}{
+		Role: m.Role, Content: content, ReasoningContent: m.ReasoningContent, ToolCalls: m.ToolCalls,
+	})
 }
 
 func (m *deepSeekMessage) UnmarshalJSON(data []byte) error {
-	type wireMessage deepSeekMessage
-	var decoded wireMessage
+	var decoded struct {
+		Role             string          `json:"role"`
+		Content          json.RawMessage `json:"content"`
+		ReasoningContent string          `json:"reasoning_content,omitempty"`
+		ToolCalls        json.RawMessage `json:"tool_calls,omitempty"`
+	}
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	*m = deepSeekMessage(decoded)
+	var content string
+	if len(decoded.Content) > 0 && string(decoded.Content) != "null" {
+		if err := json.Unmarshal(decoded.Content, &content); err != nil {
+			return fmt.Errorf("decode DeepSeek message content: %w", err)
+		}
+	}
+	*m = deepSeekMessage{
+		Role: decoded.Role, Content: content, ReasoningContent: decoded.ReasoningContent, ToolCalls: decoded.ToolCalls,
+	}
 	m.raw = append(m.raw[:0], data...)
 	return nil
+}
+
+func deepSeekSupportsImages(model string) bool {
+	return model == ModelDeepSeek41Flash
 }
 
 type deepSeekRequest struct {

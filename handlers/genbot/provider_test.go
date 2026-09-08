@@ -35,7 +35,7 @@ func testContent(msgType, text string) q.GeminiContent {
 }
 
 func TestDeepSeekMediaConversion(t *testing.T) {
-	photo, ok := deepSeekContent(ptr(testContent("photo", "caption")), nil)
+	photo, ok := deepSeekContent(ptr(testContent("photo", "caption")), nil, false)
 	require.True(t, ok)
 	require.Equal(t, "[ tester 1970-01-01 08:02:03 ]\ncaption\n[图片]", photo.Content)
 	require.NotContains(t, photo.Content, "-start-label-")
@@ -44,16 +44,34 @@ func TestDeepSeekMediaConversion(t *testing.T) {
 	require.NotContains(t, photo.Content, "reply:")
 	require.NotContains(t, photo.Content, "quote:")
 
-	sticker, ok := deepSeekContent(ptr(testContent("sticker", "🙂")), nil)
+	sticker, ok := deepSeekContent(ptr(testContent("sticker", "🙂")), nil, false)
 	require.True(t, ok)
 	require.Contains(t, sticker.Content, "🙂")
 
-	_, ok = deepSeekContent(ptr(testContent("video", "")), nil)
+	_, ok = deepSeekContent(ptr(testContent("video", "")), nil, false)
 	require.False(t, ok)
-	videoCaption, ok := deepSeekContent(ptr(testContent("video", "only caption")), nil)
+	videoCaption, ok := deepSeekContent(ptr(testContent("video", "only caption")), nil, false)
 	require.True(t, ok)
 	require.Contains(t, videoCaption.Content, "only caption")
 	require.NotContains(t, videoCaption.Content, "[视频]")
+}
+
+func TestDeepSeek41ImageConversion(t *testing.T) {
+	photo := testContent("photo", "caption")
+	photo.Blob = []byte("image")
+	photo.MimeType = sql.NullString{String: "image/jpeg", Valid: true}
+	message, ok := deepSeekContent(&photo, nil, true)
+	require.True(t, ok)
+	require.Empty(t, message.Content)
+	require.Len(t, message.ContentParts, 2)
+	require.Equal(t, "text", message.ContentParts[0].Type)
+	require.Contains(t, message.ContentParts[0].Text, "caption")
+	require.Equal(t, "image_url", message.ContentParts[1].Type)
+	require.Equal(t, "data:image/jpeg;base64,aW1hZ2U=", message.ContentParts[1].ImageURL.URL)
+
+	encoded, err := json.Marshal(message)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"role":"user","content":[{"type":"text","text":"[ tester 1970-01-01 08:02:03 ]\ncaption"},{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,aW1hZ2U="}}]}`, string(encoded))
 }
 
 func TestDeepSeekPureVideoRejected(t *testing.T) {
@@ -112,7 +130,7 @@ func TestCallDeepSeek(t *testing.T) {
 
 	replayed, ok := deepSeekContent(&q.GeminiContent{MsgID: 8, Role: "model"}, map[int64]g.AIAssistantPayload{
 		8: {MsgID: 8, Provider: ProviderDeepSeek, Format: result.AssistantPayloadFormat, Payload: result.AssistantPayload},
-	})
+	}, false)
 	require.True(t, ok)
 	require.Equal(t, assistant, replayed)
 	replayedJSON, err := json.Marshal(replayed)
@@ -207,7 +225,7 @@ func TestDamagedAssistantPayloadFallsBackToSavedBody(t *testing.T) {
 
 	payloads[11] = g.AIAssistantPayload{MsgID: 11, Provider: ProviderDeepSeek,
 		Format: PayloadFormatDeepSeekMessage, Payload: []byte("not-json")}
-	deepSeekMessage, ok := deepSeekContent(&record, payloads)
+	deepSeekMessage, ok := deepSeekContent(&record, payloads, false)
 	require.True(t, ok)
 	require.Equal(t, "safe fallback", deepSeekMessage.Content)
 }
@@ -638,7 +656,7 @@ func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error)
 
 func TestModelKeyboardMarksCurrent(t *testing.T) {
 	keyboard := modelKeyboard(ModelDeepSeekFlash, 12345)
-	require.Len(t, keyboard.InlineKeyboard, 4)
+	require.Len(t, keyboard.InlineKeyboard, 5)
 	selected := 0
 	for _, row := range keyboard.InlineKeyboard {
 		if strings.HasPrefix(row[0].Text, "✅") {

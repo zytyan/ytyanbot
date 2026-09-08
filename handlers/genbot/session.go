@@ -146,7 +146,7 @@ func genaiContentsFromDatabase(databaseContents []q.GeminiContent,
 	return contents
 }
 
-func deepSeekContent(content *q.GeminiContent, payloads map[int64]g.AIAssistantPayload) (deepSeekMessage, bool) {
+func deepSeekContent(content *q.GeminiContent, payloads map[int64]g.AIAssistantPayload, supportsImages bool) (deepSeekMessage, bool) {
 	if content.Role == genai.RoleModel {
 		if payload, ok := payloads[content.MsgID]; ok && payload.Provider == ProviderDeepSeek && payload.Format == PayloadFormatDeepSeekMessage {
 			var saved deepSeekMessage
@@ -168,17 +168,37 @@ func deepSeekContent(content *q.GeminiContent, payloads map[int64]g.AIAssistantP
 	if content.MsgType == "video" && !content.Text.Valid {
 		return deepSeekMessage{}, false
 	}
-	text := strings.Builder{}
-	text.WriteString(compactUserText(content))
+	text := compactUserText(content)
+	if supportsImages && len(content.Blob) > 0 && content.MimeType.Valid && isDeepSeekImageMIME(content.MimeType.String) {
+		return deepSeekImageMessage(text, content.MimeType.String, content.Blob), true
+	}
 	if content.MsgType == "photo" {
 		if content.Text.Valid && content.Text.String != "" {
-			text.WriteByte('\n')
+			text += "\n"
 		}
-		text.WriteString("[图片]")
+		text += "[图片]"
 	} else if content.MsgType == "sticker" && !content.Text.Valid {
-		text.WriteString("[贴纸]")
+		text += "[贴纸]"
 	}
-	return deepSeekMessage{Role: "user", Content: text.String()}, true
+	return deepSeekMessage{Role: "user", Content: text}, true
+}
+
+func isDeepSeekImageMIME(mimeType string) bool {
+	switch strings.ToLower(mimeType) {
+	case "image/jpeg", "image/png", "image/gif", "image/webp":
+		return true
+	default:
+		return false
+	}
+}
+
+func deepSeekImageMessage(text, mimeType string, image []byte) deepSeekMessage {
+	return deepSeekMessage{Role: "user", ContentParts: []deepSeekContentPart{
+		{Type: "text", Text: text},
+		{Type: "image_url", ImageURL: &struct {
+			URL string `json:"url"`
+		}{URL: "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(image)}},
+	}}
 }
 
 func (s *GeminiSession) ToDeepSeekMessages(systemPrompt string) ([]deepSeekMessage, error) {
@@ -199,7 +219,7 @@ func (s *GeminiSession) ToDeepSeekMessages(systemPrompt string) ([]deepSeekMessa
 		payloads = nil
 	}
 	for i := range allContents {
-		if message, ok := deepSeekContent(&allContents[i], payloads); ok {
+		if message, ok := deepSeekContent(&allContents[i], payloads, deepSeekSupportsImages(s.Model)); ok {
 			messages = append(messages, message)
 		}
 	}
@@ -264,7 +284,7 @@ func (s *GeminiSession) addTgMessage(bot *gotgbot.Bot, msg *gotgbot.Message, rol
 		if !content.Text.Valid {
 			content.Text = sql.NullString{String: "[贴纸]", Valid: true}
 		}
-		if !msg.Sticker.IsAnimated && s.Provider != ProviderDeepSeek {
+		if !msg.Sticker.IsAnimated && (s.Provider != ProviderDeepSeek || deepSeekSupportsImages(s.Model)) {
 			data, err = h.DownloadToMemoryCached(bot, msg.Sticker.FileId)
 			if err != nil {
 				return err

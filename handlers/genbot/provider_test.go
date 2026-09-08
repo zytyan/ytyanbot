@@ -91,6 +91,23 @@ func TestDeepSeekVisionModelRoutesImageInput(t *testing.T) {
 	require.Empty(t, messages[1].ContentParts)
 }
 
+func TestDeepSeekVisionCombinesPhotoAndFollowupText(t *testing.T) {
+	photo := testContent("photo", "")
+	photo.MsgID = 1
+	photo.Blob = []byte("image")
+	photo.MimeType = sql.NullString{String: "image/jpeg", Valid: true}
+	followup := testContent("text", "@ytyan_bot describe the image")
+	followup.MsgID = 2
+	session := &GeminiSession{Model: ModelDeepSeekVision, TmpContents: []q.GeminiContent{photo, followup}}
+
+	messages, err := session.ToDeepSeekMessages("system")
+	require.NoError(t, err)
+	require.Len(t, messages, 2)
+	require.Len(t, messages[1].ContentParts, 3)
+	require.Equal(t, "image_url", messages[1].ContentParts[1].Type)
+	require.Contains(t, messages[1].ContentParts[2].Text, "describe the image")
+}
+
 func TestDeepSeekPureVideoRejected(t *testing.T) {
 	session := &GeminiSession{TmpContents: []q.GeminiContent{testContent("video", "")}}
 	_, err := session.ToDeepSeekMessages("system")

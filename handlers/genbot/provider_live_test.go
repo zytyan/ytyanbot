@@ -448,11 +448,24 @@ func TestLiveDeepSeekVisionImage(t *testing.T) {
 	requireLiveAI(t)
 	require.NotEmpty(t, g.GetConfig().DeepSeekKey)
 	image := liveVisionTestImage(t)
-	request := deepSeekRequest{
-		Model: ModelDeepSeekVision,
-		Messages: []deepSeekMessage{
-			deepSeekImageMessage("图片上半部分是否为红色、下半部分是否为蓝色？只回答 红上蓝下。", "image/png", image),
+	session := &GeminiSession{Model: ModelDeepSeekVision, TmpContents: []q.GeminiContent{
+		{
+			MsgID: 1, Role: genai.RoleUser, Username: "vision tester", MsgType: "photo",
+			SentTime: q.UnixTime{Time: time.Unix(1, 0)}, Blob: image,
+			MimeType: sql.NullString{String: "image/png", Valid: true},
 		},
+		{
+			MsgID: 2, Role: genai.RoleUser, Username: "vision tester", MsgType: "text",
+			SentTime: q.UnixTime{Time: time.Unix(2, 0)},
+			Text:     sql.NullString{String: "图片上半部分是否为红色、下半部分是否为蓝色？只回答 红上蓝下。", Valid: true},
+		},
+	}}
+	messages, err := session.ToDeepSeekMessages("system")
+	require.NoError(t, err)
+	require.Len(t, messages, 2)
+	require.Len(t, messages[1].ContentParts, 3)
+	request := deepSeekRequest{
+		Model: ModelDeepSeekVision, Messages: messages,
 		MaxTokens: 64,
 		Thinking:  &deepSeekThinking{Type: "disabled"},
 	}

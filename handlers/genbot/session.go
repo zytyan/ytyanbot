@@ -201,6 +201,27 @@ func deepSeekImageMessage(text, mimeType string, image []byte) deepSeekMessage {
 	}}
 }
 
+// mergeDeepSeekUserMessages keeps a photo followed by a textual follow-up in
+// one user turn. DeepSeek Vision only attends to image parts in the active
+// user message, while Telegram commonly delivers the photo and @bot prompt as
+// two consecutive messages.
+func mergeDeepSeekUserMessages(previous *deepSeekMessage, current deepSeekMessage) bool {
+	if previous.Role != "user" || current.Role != "user" ||
+		(previous.ContentParts == nil && current.ContentParts == nil) {
+		return false
+	}
+	if previous.ContentParts == nil {
+		previous.ContentParts = []deepSeekContentPart{{Type: "text", Text: previous.Content}}
+		previous.Content = ""
+	}
+	if current.ContentParts == nil {
+		previous.ContentParts = append(previous.ContentParts, deepSeekContentPart{Type: "text", Text: current.Content})
+		return true
+	}
+	previous.ContentParts = append(previous.ContentParts, current.ContentParts...)
+	return true
+}
+
 func (s *GeminiSession) ToDeepSeekMessages(systemPrompt string) ([]deepSeekMessage, error) {
 	allContents := make([]q.GeminiContent, 0, len(s.Contents)+len(s.TmpContents))
 	allContents = append(allContents, s.Contents...)
@@ -220,6 +241,10 @@ func (s *GeminiSession) ToDeepSeekMessages(systemPrompt string) ([]deepSeekMessa
 	}
 	for i := range allContents {
 		if message, ok := deepSeekContent(&allContents[i], payloads, deepSeekSupportsImages(s.Model)); ok {
+			if deepSeekSupportsImages(s.Model) && len(messages) > 1 &&
+				mergeDeepSeekUserMessages(&messages[len(messages)-1], message) {
+				continue
+			}
 			messages = append(messages, message)
 		}
 	}

@@ -35,6 +35,10 @@ const (
 
 var ErrDeepSeekVideoOnly = errors.New("当前模型不处理视频")
 
+const deepSeekRichMarkdownInstruction = `
+
+面向用户的最终回复必须使用 Telegram Rich Markdown。根据内容合理使用标题、加粗、列表、引用、表格、行内代码、代码块和公式；不要把整条回复包进代码块，也不要把 Markdown 语法转义成纯文本。`
+
 type AIUsage struct {
 	InputTokens       int64
 	CachedInputTokens int64
@@ -260,7 +264,7 @@ func generateDeepSeek(ctx context.Context, session *GeminiSession, systemPrompt 
 		return nil, errors.New("DeepSeek API Key 未配置")
 	}
 	requestSession := deepSeekRequestSession(session, window)
-	messages, err := requestSession.ToDeepSeekMessages(systemPrompt)
+	messages, err := requestSession.ToDeepSeekMessages(deepSeekSystemPrompt(systemPrompt))
 	if err != nil {
 		return nil, err
 	}
@@ -287,6 +291,10 @@ func generateDeepSeek(ctx context.Context, session *GeminiSession, systemPrompt 
 		}
 	}
 	return nil, err
+}
+
+func deepSeekSystemPrompt(systemPrompt string) string {
+	return strings.TrimSpace(systemPrompt) + deepSeekRichMarkdownInstruction
 }
 
 func deepSeekRequestSession(session *GeminiSession, window aiRequestWindow) *GeminiSession {

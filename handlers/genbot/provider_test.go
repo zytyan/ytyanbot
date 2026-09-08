@@ -103,6 +103,13 @@ func TestDeepSeekRequestSessionRetainsMultimodalModel(t *testing.T) {
 	require.True(t, deepSeekMessageHasImage(messages[1]))
 }
 
+func TestDeepSeekSystemPromptRequestsRichMarkdown(t *testing.T) {
+	prompt := deepSeekSystemPrompt("base prompt")
+	require.Contains(t, prompt, "base prompt")
+	require.Contains(t, prompt, "Telegram Rich Markdown")
+	require.Contains(t, prompt, "表格")
+}
+
 func TestDeepSeekVisionCombinesPhotoAndFollowupText(t *testing.T) {
 	photo := testContent("photo", "")
 	photo.MsgID = 1

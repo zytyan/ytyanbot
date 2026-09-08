@@ -56,7 +56,7 @@ func TestDeepSeekMediaConversion(t *testing.T) {
 	require.NotContains(t, videoCaption.Content, "[视频]")
 }
 
-func TestDeepSeek41ImageConversion(t *testing.T) {
+func TestDeepSeekVisionImageConversion(t *testing.T) {
 	photo := testContent("photo", "caption")
 	photo.Blob = []byte("image")
 	photo.MimeType = sql.NullString{String: "image/jpeg", Valid: true}
@@ -72,6 +72,23 @@ func TestDeepSeek41ImageConversion(t *testing.T) {
 	encoded, err := json.Marshal(message)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"role":"user","content":[{"type":"text","text":"[ tester 1970-01-01 08:02:03 ]\ncaption"},{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,aW1hZ2U="}}]}`, string(encoded))
+}
+
+func TestDeepSeekVisionModelRoutesImageInput(t *testing.T) {
+	photo := testContent("photo", "caption")
+	photo.Blob = []byte("image")
+	photo.MimeType = sql.NullString{String: "image/jpeg", Valid: true}
+
+	vision := &GeminiSession{Model: ModelDeepSeekVision, TmpContents: []q.GeminiContent{photo}}
+	messages, err := vision.ToDeepSeekMessages("system")
+	require.NoError(t, err)
+	require.Len(t, messages[1].ContentParts, 2)
+
+	preview := &GeminiSession{Model: ModelDeepSeek41Flash, TmpContents: []q.GeminiContent{photo}}
+	messages, err = preview.ToDeepSeekMessages("system")
+	require.NoError(t, err)
+	require.Contains(t, messages[1].Content, "[图片]")
+	require.Empty(t, messages[1].ContentParts)
 }
 
 func TestDeepSeekPureVideoRejected(t *testing.T) {
@@ -656,7 +673,7 @@ func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error)
 
 func TestModelKeyboardMarksCurrent(t *testing.T) {
 	keyboard := modelKeyboard(ModelDeepSeekFlash, 12345)
-	require.Len(t, keyboard.InlineKeyboard, 5)
+	require.Len(t, keyboard.InlineKeyboard, 6)
 	selected := 0
 	for _, row := range keyboard.InlineKeyboard {
 		if strings.HasPrefix(row[0].Text, "✅") {

@@ -19,6 +19,7 @@ const (
 	ModelGeminiFlash     = "gemini-3-flash-preview"
 	ModelGeminiFlashLite = "gemini-3.1-flash-lite"
 	ModelDeepSeekFlash   = "deepseek-v4-flash"
+	ModelDeepSeekVision  = "deepseek-v4-flash-vision-exp"
 	ModelDeepSeek41Flash = "deepseek-v4.1-flash-expires-on-0910"
 	defaultAIModel       = ModelGeminiFlash
 )
@@ -68,6 +69,7 @@ var modelOptions = []modelOption{
 	{Model: ModelGeminiFlash, Label: "Gemini 3 Flash Preview", Provider: ProviderGemini},
 	{Model: ModelGeminiFlashLite, Label: "Gemini 3.1 Flash-Lite", Provider: ProviderGemini},
 	{Model: ModelDeepSeekFlash, Label: "DeepSeek V4 Flash", Provider: ProviderDeepSeek},
+	{Model: ModelDeepSeekVision, Label: "DeepSeek V4 Flash Vision（图片）", Provider: ProviderDeepSeek},
 	{Model: ModelDeepSeek41Flash, Label: "DeepSeek V4.1 Flash（内测）", Provider: ProviderDeepSeek},
 }
 
@@ -223,7 +225,7 @@ func (m *deepSeekMessage) UnmarshalJSON(data []byte) error {
 }
 
 func deepSeekSupportsImages(model string) bool {
-	return model == ModelDeepSeek41Flash
+	return model == ModelDeepSeekVision
 }
 
 type deepSeekRequest struct {

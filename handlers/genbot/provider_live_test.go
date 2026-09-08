@@ -1,10 +1,14 @@
 package genbot
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"net/http"
 	"os"
 	"strings"
@@ -438,4 +442,44 @@ func TestLiveDeepSeekThinkingRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, string(result.AssistantPayload), string(replayed))
 	t.Logf("deepseek reasoning_chars=%d output_chars=%d", len([]rune(assistant.ReasoningContent)), len([]rune(assistant.Content)))
+}
+
+func TestLiveDeepSeekVisionImage(t *testing.T) {
+	requireLiveAI(t)
+	require.NotEmpty(t, g.GetConfig().DeepSeekKey)
+	image := liveVisionTestImage(t)
+	request := deepSeekRequest{
+		Model: ModelDeepSeekVision,
+		Messages: []deepSeekMessage{
+			deepSeekImageMessage("图片上半部分是否为红色、下半部分是否为蓝色？只回答 红上蓝下。", "image/png", image),
+		},
+		MaxTokens: 64,
+		Thinking:  &deepSeekThinking{Type: "disabled"},
+	}
+	result, err := callDeepSeek(context.Background(), &http.Client{Timeout: 15 * time.Minute},
+		g.GetConfig().DeepSeekBaseURL, g.GetConfig().DeepSeekKey, request)
+	require.NoError(t, err)
+	require.NotEmpty(t, result.DisplayText)
+	require.Contains(t, result.DisplayText, "红上蓝下")
+	require.Greater(t, result.Usage.InputTokens, int64(0))
+	t.Logf("deepseek vision accepted image: input_tokens=%d output_tokens=%d response=%q",
+		result.Usage.InputTokens, result.Usage.OutputTokens, result.DisplayText)
+}
+
+func liveVisionTestImage(t *testing.T) []byte {
+	t.Helper()
+	const size = 64
+	canvas := image.NewRGBA(image.Rect(0, 0, size, size))
+	for y := range size {
+		fill := color.RGBA{B: 255, A: 255}
+		if y < size/2 {
+			fill = color.RGBA{R: 255, A: 255}
+		}
+		for x := range size {
+			canvas.SetRGBA(x, y, fill)
+		}
+	}
+	var encoded bytes.Buffer
+	require.NoError(t, png.Encode(&encoded, canvas))
+	return encoded.Bytes()
 }

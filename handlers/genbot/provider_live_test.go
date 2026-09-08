@@ -455,15 +455,20 @@ func TestLiveDeepSeekVisionImage(t *testing.T) {
 			MimeType: sql.NullString{String: "image/png", Valid: true},
 		},
 		{
-			MsgID: 2, Role: genai.RoleUser, Username: "vision tester", MsgType: "text",
+			MsgID: 2, Role: genai.RoleModel, Username: "bot", MsgType: "text",
 			SentTime: q.UnixTime{Time: time.Unix(2, 0)},
+			Text:     sql.NullString{String: "请继续提问。", Valid: true},
+		},
+		{
+			MsgID: 3, Role: genai.RoleUser, Username: "vision tester", MsgType: "text",
+			SentTime: q.UnixTime{Time: time.Unix(3, 0)},
 			Text:     sql.NullString{String: "图片上半部分是否为红色、下半部分是否为蓝色？只回答 红上蓝下。", Valid: true},
 		},
 	}}
 	messages, err := session.ToDeepSeekMessages("system")
 	require.NoError(t, err)
-	require.Len(t, messages, 2)
-	require.Len(t, messages[1].ContentParts, 3)
+	require.Len(t, messages, 4)
+	require.True(t, deepSeekMessageHasImage(messages[3]))
 	request := deepSeekRequest{
 		Model: ModelDeepSeekVision, Messages: messages,
 		MaxTokens: 64,

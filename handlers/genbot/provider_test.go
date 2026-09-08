@@ -108,6 +108,27 @@ func TestDeepSeekVisionCombinesPhotoAndFollowupText(t *testing.T) {
 	require.Contains(t, messages[1].ContentParts[2].Text, "describe the image")
 }
 
+func TestDeepSeekVisionMovesPreviousPhotoToFollowupTurn(t *testing.T) {
+	photo := testContent("photo", "")
+	photo.MsgID = 1
+	photo.Blob = []byte("image")
+	photo.MimeType = sql.NullString{String: "image/jpeg", Valid: true}
+	answer := testContent("text", "ask a follow-up")
+	answer.MsgID = 2
+	answer.Role = genai.RoleModel
+	followup := testContent("text", "describe the picture")
+	followup.MsgID = 3
+	session := &GeminiSession{Model: ModelDeepSeekVision,
+		Contents: []q.GeminiContent{photo, answer}, TmpContents: []q.GeminiContent{followup}}
+
+	messages, err := session.ToDeepSeekMessages("system")
+	require.NoError(t, err)
+	require.Len(t, messages, 4)
+	require.False(t, deepSeekMessageHasImage(messages[1]))
+	require.True(t, deepSeekMessageHasImage(messages[3]))
+	require.Contains(t, messages[3].ContentParts[0].Text, "describe the picture")
+}
+
 func TestDeepSeekPureVideoRejected(t *testing.T) {
 	session := &GeminiSession{TmpContents: []q.GeminiContent{testContent("video", "")}}
 	_, err := session.ToDeepSeekMessages("system")

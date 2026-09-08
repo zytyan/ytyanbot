@@ -222,6 +222,49 @@ func mergeDeepSeekUserMessages(previous *deepSeekMessage, current deepSeekMessag
 	return true
 }
 
+func ensureDeepSeekContentParts(message *deepSeekMessage) {
+	if message.ContentParts != nil {
+		return
+	}
+	message.ContentParts = []deepSeekContentPart{{Type: "text", Text: message.Content}}
+	message.Content = ""
+}
+
+func deepSeekMessageHasImage(message deepSeekMessage) bool {
+	for _, part := range message.ContentParts {
+		if part.Type == "image_url" && part.ImageURL != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// moveLatestDeepSeekImageToActiveUser makes the most recent Telegram image
+// available to a later follow-up question. Unlike Gemini, DeepSeek Vision
+// does not reliably attend to images in an earlier user turn after an
+// assistant response, so keep the image in the active user turn instead.
+func moveLatestDeepSeekImageToActiveUser(messages []deepSeekMessage) {
+	if len(messages) < 3 || messages[len(messages)-1].Role != "user" ||
+		deepSeekMessageHasImage(messages[len(messages)-1]) {
+		return
+	}
+	for i := len(messages) - 2; i > 0; i-- {
+		if messages[i].Role != "user" {
+			continue
+		}
+		for j := len(messages[i].ContentParts) - 1; j >= 0; j-- {
+			part := messages[i].ContentParts[j]
+			if part.Type != "image_url" || part.ImageURL == nil {
+				continue
+			}
+			messages[i].ContentParts = append(messages[i].ContentParts[:j], messages[i].ContentParts[j+1:]...)
+			ensureDeepSeekContentParts(&messages[len(messages)-1])
+			messages[len(messages)-1].ContentParts = append(messages[len(messages)-1].ContentParts, part)
+			return
+		}
+	}
+}
+
 func (s *GeminiSession) ToDeepSeekMessages(systemPrompt string) ([]deepSeekMessage, error) {
 	allContents := make([]q.GeminiContent, 0, len(s.Contents)+len(s.TmpContents))
 	allContents = append(allContents, s.Contents...)
@@ -247,6 +290,9 @@ func (s *GeminiSession) ToDeepSeekMessages(systemPrompt string) ([]deepSeekMessa
 			}
 			messages = append(messages, message)
 		}
+	}
+	if deepSeekSupportsImages(s.Model) {
+		moveLatestDeepSeekImageToActiveUser(messages)
 	}
 	return messages, nil
 }

@@ -7,14 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,52 +22,31 @@ import (
 
 var Bin = "yt-dlp"
 
+// BBDownBin is the bbdown-go executable used for Bilibili downloads.
+// Keep this separate from Bin because other sites continue to use yt-dlp.
+var BBDownBin = "bbdown-go"
+
 var biliCookieFiles = []string{"bili_cookies.json", "build/bili_cookies.json", "../../build/bili_cookies.json"}
 
 var reA = regexp.MustCompile(`(?i)/(BV[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+|av\d+)`)
 
-type biliCookieAccount struct {
-	Cookies map[string]string `json:"cookies"`
-}
-
-func loadBiliCookie() (string, error) {
-	var data []byte
-	var err error
+func findBiliCookieFile() (string, error) {
+	var lastErr error
 	for _, filename := range biliCookieFiles {
-		data, err = os.ReadFile(filename)
-		if err == nil {
-			break
+		if _, err := os.Stat(filename); err == nil {
+			absoluteFilename, err := filepath.Abs(filename)
+			if err != nil {
+				return "", fmt.Errorf("解析 Bilibili Cookie 文件路径失败: %w", err)
+			}
+			return absoluteFilename, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			lastErr = err
 		}
 	}
-	if err != nil {
-		return "", fmt.Errorf("读取Bilibili Cookie 文件失败: %w", err)
+	if lastErr != nil {
+		return "", fmt.Errorf("读取 Bilibili Cookie 文件失败: %w", lastErr)
 	}
-	accounts := map[string]biliCookieAccount{}
-	if err := json.Unmarshal(data, &accounts); err != nil {
-		return "", fmt.Errorf("解析Bilibili Cookie 文件失败: %w", err)
-	}
-	ids := make([]string, 0, len(accounts))
-	for id := range accounts {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	for _, id := range ids {
-		cookies := accounts[id].Cookies
-		if len(cookies) == 0 {
-			continue
-		}
-		keys := make([]string, 0, len(cookies))
-		for key := range cookies {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		parts := make([]string, 0, len(keys))
-		for _, key := range keys {
-			parts = append(parts, key+"="+cookies[key])
-		}
-		return strings.Join(parts, "; "), nil
-	}
-	return "", errors.New("Bilibili Cookie 文件中没有可用账号")
+	return "", fmt.Errorf("找不到 Bilibili Cookie 文件（已检查：%s）", strings.Join(biliCookieFiles, "、"))
 }
 
 type RunError struct {
@@ -184,35 +160,6 @@ func (c *Req) Clean() error {
 	return os.RemoveAll(c.tmpPath)
 }
 
-func isVideoFile(name string) bool {
-	videoSuffixes := []string{".mp4", ".mkv", ".flv", ".ts", ".avi", ".webm"}
-	return slices.Contains(videoSuffixes, strings.ToLower(filepath.Ext(name)))
-
-}
-
-func getFirstFile(path string) (string, error) {
-	var file string
-	err := filepath.WalkDir(path, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if !d.IsDir() && isVideoFile(d.Name()) {
-			file = path
-			return filepath.SkipAll
-		}
-
-		return nil
-	})
-	if err != nil {
-		return "", fmt.Errorf("读取目录 %s 失败", path)
-	}
-	if file != "" {
-		return file, nil
-	}
-	return "", fmt.Errorf("%s 目录中没有文件", path)
-}
-
 var client = &http.Client{
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		return http.ErrUseLastResponse
@@ -306,6 +253,45 @@ func runBBDownConcurrent(download func() error, loadInfo func() (Info, error)) (
 	return infoResult.info, infoResult.err, downloadErr
 }
 
+type bbdownOutput struct {
+	VideoPath string `json:"video_path"`
+	AudioPath string `json:"audio_path"`
+}
+
+func bbdownArgs(cookieFile, workDir string, audioOnly bool, url string) []string {
+	args := []string{
+		"--cookie-file", cookieFile,
+		"-work-dir", workDir,
+		"-encoding-priority", "HEVC",
+	}
+	if audioOnly {
+		args = append(args, "--audio-only")
+	}
+	return append(args, url)
+}
+
+func parseBBDownOutput(output []byte, workDir string, audioOnly bool) (string, error) {
+	var result bbdownOutput
+	if err := json.Unmarshal(output, &result); err != nil {
+		return "", fmt.Errorf("解析 bbdown-go JSON 输出失败: %w", err)
+	}
+	path := result.VideoPath
+	if audioOnly {
+		path = result.AudioPath
+	}
+	if path == "" {
+		kind := "video_path"
+		if audioOnly {
+			kind = "audio_path"
+		}
+		return "", fmt.Errorf("bbdown-go JSON 输出中没有 %s", kind)
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(workDir, path)
+	}
+	return filepath.Clean(path), nil
+}
+
 func (c *Req) runWithCtxBBDown(ctx context.Context) (resp *Resp, err error) {
 	resp = &Resp{req: c}
 	tmp := c.tmpPath
@@ -313,11 +299,11 @@ func (c *Req) runWithCtxBBDown(ctx context.Context) (resp *Resp, err error) {
 	if err != nil {
 		return nil, err
 	}
-	cookie, err := loadBiliCookie()
+	cookieFile, err := findBiliCookieFile()
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, "/usr/local/bin/dotnet-tools/BBDown", c.Url, "-app", "-c", cookie, "-e", "hevc,av1,avc", "-q", "720P 高清", "-F", fmt.Sprintf("%s/<bvid>", tmp))
+	cmd := exec.CommandContext(ctx, BBDownBin, bbdownArgs(cookieFile, tmp, c.AudioOnly, c.Url)...)
 	outBuf := new(bytes.Buffer)
 	errBuf := new(bytes.Buffer)
 	cmd.Stdout = outBuf
@@ -339,7 +325,7 @@ func (c *Req) runWithCtxBBDown(ctx context.Context) (resp *Resp, err error) {
 		}
 		return resp, err
 	}
-	resp.FilePath, err = getFirstFile(tmp)
+	resp.FilePath, err = parseBBDownOutput(outBuf.Bytes(), tmp, c.AudioOnly)
 	if err != nil {
 		return nil, err
 	}

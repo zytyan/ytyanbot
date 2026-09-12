@@ -30,6 +30,7 @@
 
 - Go 1.26.1 或兼容版本
 - SQLite3 运行环境
+- Bilibili 下载：安装新版 [bbdown-go](https://github.com/zytyan/bbdown-go) 与 `ffmpeg`，并确保服务用户的 `PATH` 中可找到 `bbdown-go`（例如 `/usr/local/bin/bbdown-go`）。机器人会把现有的 `bili_cookies.json` 作为 `--cookie-file` 账户 JSON 直接传给它。
 - 可选：本地 Telegram Bot API 服务，配置项为 `tg-api-url`
 - 可选：Azure OCR / Content Moderator，用于图片 OCR 和 NSFW 检测
 - 可选：Gemini 和 DeepSeek API Key，用于 AI 对话

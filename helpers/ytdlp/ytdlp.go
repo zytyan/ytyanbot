@@ -3,6 +3,7 @@ package ytdlp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -22,7 +24,54 @@ import (
 )
 
 var Bin = "yt-dlp"
+
+var biliCookieFiles = []string{"bili_cookies.json", "build/bili_cookies.json", "../../build/bili_cookies.json"}
+
 var reA = regexp.MustCompile(`(?i)/(BV[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+|av\d+)`)
+
+type biliCookieAccount struct {
+	Cookies map[string]string `json:"cookies"`
+}
+
+func loadBiliCookie() (string, error) {
+	var data []byte
+	var err error
+	for _, filename := range biliCookieFiles {
+		data, err = os.ReadFile(filename)
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return "", fmt.Errorf("读取Bilibili Cookie 文件失败: %w", err)
+	}
+	accounts := map[string]biliCookieAccount{}
+	if err := json.Unmarshal(data, &accounts); err != nil {
+		return "", fmt.Errorf("解析Bilibili Cookie 文件失败: %w", err)
+	}
+	ids := make([]string, 0, len(accounts))
+	for id := range accounts {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		cookies := accounts[id].Cookies
+		if len(cookies) == 0 {
+			continue
+		}
+		keys := make([]string, 0, len(cookies))
+		for key := range cookies {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, key := range keys {
+			parts = append(parts, key+"="+cookies[key])
+		}
+		return strings.Join(parts, "; "), nil
+	}
+	return "", errors.New("Bilibili Cookie 文件中没有可用账号")
+}
 
 type RunError struct {
 	Err      error
@@ -34,7 +83,15 @@ type RunError struct {
 
 func (e *RunError) Error() string {
 	argList := make([]string, 0, len(e.Args))
+	redactNext := false
 	for _, arg := range e.Args {
+		if redactNext {
+			arg = "[REDACTED]"
+			redactNext = false
+		}
+		if arg == "-c" || arg == "--cookie" || arg == "--cookies" {
+			redactNext = true
+		}
 		argList = append(argList, strconv.Quote(arg))
 	}
 	args := strings.Join(argList, " ")
@@ -256,7 +313,11 @@ func (c *Req) runWithCtxBBDown(ctx context.Context) (resp *Resp, err error) {
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, "/usr/local/bin/dotnet-tools/BBDown", c.Url, "-app", "-e", "hevc,av1,avc", "-q", "720P 高清", "-F", fmt.Sprintf("%s/<bvid>", tmp))
+	cookie, err := loadBiliCookie()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, "/usr/local/bin/dotnet-tools/BBDown", c.Url, "-app", "-c", cookie, "-e", "hevc,av1,avc", "-q", "720P 高清", "-F", fmt.Sprintf("%s/<bvid>", tmp))
 	outBuf := new(bytes.Buffer)
 	errBuf := new(bytes.Buffer)
 	cmd.Stdout = outBuf

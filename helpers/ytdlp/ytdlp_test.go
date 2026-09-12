@@ -2,9 +2,23 @@ package ytdlp
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestRunErrorRedactsCookieArgument(t *testing.T) {
+	err := (&RunError{
+		Err:  errors.New("command failed"),
+		Args: []string{"video-url", "-c", "SESSDATA=secret; bili_jct=also-secret", "-q", "720P"},
+	}).Error()
+	if strings.Contains(err, "secret") || strings.Contains(err, "also-secret") {
+		t.Fatalf("RunError exposed cookie: %s", err)
+	}
+	if !strings.Contains(err, `"-c" "[REDACTED]"`) {
+		t.Fatalf("RunError did not show redacted cookie argument: %s", err)
+	}
+}
 
 func TestRunBBDownConcurrentWaitsAndPreservesBothErrors(t *testing.T) {
 	downloadErr := errors.New("download failed")

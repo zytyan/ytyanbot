@@ -232,7 +232,9 @@ func main() {
 	)
 	genBotLogger := g.GetLogger("genbot", slog.LevelInfo)
 	genbot.Init(b, genBotLogger)
+	genbot.StartAIMediaGroupCleanup()
 	dp.NewMessage(message.All, hdrs.StatMessage)
+	dp.NewMessage(genbot.IsAIMediaGroup, genbot.CaptureAIMediaGroup)
 	dp.NewInlineQuery(inlinequery.All, hdrs.BiliMsgConverterInline)
 
 	dp.Command("roll", hdrs.Roll)

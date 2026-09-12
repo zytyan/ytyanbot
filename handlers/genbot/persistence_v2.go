@@ -71,7 +71,7 @@ func insertAIContent(ctx context.Context, queries *aiq.Queries, store *aimedia.S
 
 // BeginAIRun durably records all input and quoted context before a provider is
 // called. The unique request key makes retries return the existing Run.
-func (s *GeminiSession) BeginAIRun(ctx context.Context) (run aiq.AiRun, err error) {
+func (s *GeminiSession) beginAIRun(ctx context.Context, requestChatID, requestMsgID int64) (run aiq.AiRun, err error) {
 	if len(s.TmpContents) == 0 {
 		return run, errors.New("cannot start AI run without a request message")
 	}
@@ -109,9 +109,8 @@ func (s *GeminiSession) BeginAIRun(ctx context.Context) (run aiq.AiRun, err erro
 	if err = queries.TouchAISession(ctx, time.Now().Unix(), s.ID); err != nil {
 		return run, err
 	}
-	request := s.TmpContents[len(s.TmpContents)-1]
 	run, err = queries.CreateAIRun(ctx, aiq.CreateAIRunParams{
-		SessionID: s.ID, RequestChatID: request.ChatID, RequestMsgID: request.MsgID,
+		SessionID: s.ID, RequestChatID: requestChatID, RequestMsgID: requestMsgID,
 		Provider: s.Provider, Model: s.Model, RequestedAt: time.Now().Unix(),
 	})
 	if err != nil {
@@ -124,6 +123,14 @@ func (s *GeminiSession) BeginAIRun(ctx context.Context) (run aiq.AiRun, err erro
 	return run, nil
 }
 
+func (s *GeminiSession) BeginAIRun(ctx context.Context) (aiq.AiRun, error) {
+	if len(s.TmpContents) == 0 {
+		return aiq.AiRun{}, errors.New("cannot start AI run without a request message")
+	}
+	request := s.TmpContents[len(s.TmpContents)-1]
+	return s.beginAIRun(ctx, request.ChatID, request.MsgID)
+}
+
 func (s *GeminiSession) GetOrBeginAIRun(ctx context.Context, chatID, msgID int64) (aiq.AiRun, error) {
 	run, err := g.AIQ.GetAIRunByRequest(ctx, s.ID, chatID, msgID)
 	if err == nil {
@@ -132,7 +139,7 @@ func (s *GeminiSession) GetOrBeginAIRun(ctx context.Context, chatID, msgID int64
 	if !errors.Is(err, sql.ErrNoRows) {
 		return run, err
 	}
-	return s.BeginAIRun(ctx)
+	return s.beginAIRun(ctx, chatID, msgID)
 }
 
 func (s *GeminiSession) candidateRuntimeState(result *AIResult) g.AISessionRuntimeState {

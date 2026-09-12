@@ -48,8 +48,17 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.deleteAISystemPromptStmt, err = db.PrepareContext(ctx, deleteAISystemPrompt); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteAISystemPrompt: %w", err)
 	}
+	if q.deleteExpiredAIMediaGroupsStmt, err = db.PrepareContext(ctx, deleteExpiredAIMediaGroups); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteExpiredAIMediaGroups: %w", err)
+	}
 	if q.getAIChatSettingsStmt, err = db.PrepareContext(ctx, getAIChatSettings); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAIChatSettings: %w", err)
+	}
+	if q.getAIMediaGroupStmt, err = db.PrepareContext(ctx, getAIMediaGroup); err != nil {
+		return nil, fmt.Errorf("error preparing query GetAIMediaGroup: %w", err)
+	}
+	if q.getAIMediaGroupByMessageStmt, err = db.PrepareContext(ctx, getAIMediaGroupByMessage); err != nil {
+		return nil, fmt.Errorf("error preparing query GetAIMediaGroupByMessage: %w", err)
 	}
 	if q.getAIMigrationStatsStmt, err = db.PrepareContext(ctx, getAIMigrationStats); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAIMigrationStats: %w", err)
@@ -89,6 +98,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.insertMediaObjectStmt, err = db.PrepareContext(ctx, insertMediaObject); err != nil {
 		return nil, fmt.Errorf("error preparing query InsertMediaObject: %w", err)
+	}
+	if q.listAIMediaGroupPhotosStmt, err = db.PrepareContext(ctx, listAIMediaGroupPhotos); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAIMediaGroupPhotos: %w", err)
 	}
 	if q.listAIMessageMediaStmt, err = db.PrepareContext(ctx, listAIMessageMedia); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAIMessageMedia: %w", err)
@@ -131,6 +143,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.upsertAIChatSettingsStmt, err = db.PrepareContext(ctx, upsertAIChatSettings); err != nil {
 		return nil, fmt.Errorf("error preparing query UpsertAIChatSettings: %w", err)
+	}
+	if q.upsertAIMediaGroupStmt, err = db.PrepareContext(ctx, upsertAIMediaGroup); err != nil {
+		return nil, fmt.Errorf("error preparing query UpsertAIMediaGroup: %w", err)
+	}
+	if q.upsertAIMediaGroupPhotoStmt, err = db.PrepareContext(ctx, upsertAIMediaGroupPhoto); err != nil {
+		return nil, fmt.Errorf("error preparing query UpsertAIMediaGroupPhoto: %w", err)
 	}
 	if q.upsertAISessionProviderStateStmt, err = db.PrepareContext(ctx, upsertAISessionProviderState); err != nil {
 		return nil, fmt.Errorf("error preparing query UpsertAISessionProviderState: %w", err)
@@ -183,9 +201,24 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing deleteAISystemPromptStmt: %w", cerr)
 		}
 	}
+	if q.deleteExpiredAIMediaGroupsStmt != nil {
+		if cerr := q.deleteExpiredAIMediaGroupsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteExpiredAIMediaGroupsStmt: %w", cerr)
+		}
+	}
 	if q.getAIChatSettingsStmt != nil {
 		if cerr := q.getAIChatSettingsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getAIChatSettingsStmt: %w", cerr)
+		}
+	}
+	if q.getAIMediaGroupStmt != nil {
+		if cerr := q.getAIMediaGroupStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getAIMediaGroupStmt: %w", cerr)
+		}
+	}
+	if q.getAIMediaGroupByMessageStmt != nil {
+		if cerr := q.getAIMediaGroupByMessageStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getAIMediaGroupByMessageStmt: %w", cerr)
 		}
 	}
 	if q.getAIMigrationStatsStmt != nil {
@@ -251,6 +284,11 @@ func (q *Queries) Close() error {
 	if q.insertMediaObjectStmt != nil {
 		if cerr := q.insertMediaObjectStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing insertMediaObjectStmt: %w", cerr)
+		}
+	}
+	if q.listAIMediaGroupPhotosStmt != nil {
+		if cerr := q.listAIMediaGroupPhotosStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAIMediaGroupPhotosStmt: %w", cerr)
 		}
 	}
 	if q.listAIMessageMediaStmt != nil {
@@ -323,6 +361,16 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing upsertAIChatSettingsStmt: %w", cerr)
 		}
 	}
+	if q.upsertAIMediaGroupStmt != nil {
+		if cerr := q.upsertAIMediaGroupStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing upsertAIMediaGroupStmt: %w", cerr)
+		}
+	}
+	if q.upsertAIMediaGroupPhotoStmt != nil {
+		if cerr := q.upsertAIMediaGroupPhotoStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing upsertAIMediaGroupPhotoStmt: %w", cerr)
+		}
+	}
 	if q.upsertAISessionProviderStateStmt != nil {
 		if cerr := q.upsertAISessionProviderStateStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing upsertAISessionProviderStateStmt: %w", cerr)
@@ -380,7 +428,10 @@ type Queries struct {
 	createMigratedAISessionStmt           *sql.Stmt
 	deleteAISessionProviderStateStmt      *sql.Stmt
 	deleteAISystemPromptStmt              *sql.Stmt
+	deleteExpiredAIMediaGroupsStmt        *sql.Stmt
 	getAIChatSettingsStmt                 *sql.Stmt
+	getAIMediaGroupStmt                   *sql.Stmt
+	getAIMediaGroupByMessageStmt          *sql.Stmt
 	getAIMigrationStatsStmt               *sql.Stmt
 	getAIRunStmt                          *sql.Stmt
 	getAIRunByRequestStmt                 *sql.Stmt
@@ -394,6 +445,7 @@ type Queries struct {
 	incrementAISessionUsageStmt           *sql.Stmt
 	insertAIMessageStmt                   *sql.Stmt
 	insertMediaObjectStmt                 *sql.Stmt
+	listAIMediaGroupPhotosStmt            *sql.Stmt
 	listAIMessageMediaStmt                *sql.Stmt
 	listAISessionAssistantRunsStmt        *sql.Stmt
 	listAISessionMessagesStmt             *sql.Stmt
@@ -408,6 +460,8 @@ type Queries struct {
 	toggleAIChatSettingsUsageStmt         *sql.Stmt
 	touchAISessionStmt                    *sql.Stmt
 	upsertAIChatSettingsStmt              *sql.Stmt
+	upsertAIMediaGroupStmt                *sql.Stmt
+	upsertAIMediaGroupPhotoStmt           *sql.Stmt
 	upsertAISessionProviderStateStmt      *sql.Stmt
 	upsertAISystemPromptStmt              *sql.Stmt
 }
@@ -424,7 +478,10 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		createMigratedAISessionStmt:           q.createMigratedAISessionStmt,
 		deleteAISessionProviderStateStmt:      q.deleteAISessionProviderStateStmt,
 		deleteAISystemPromptStmt:              q.deleteAISystemPromptStmt,
+		deleteExpiredAIMediaGroupsStmt:        q.deleteExpiredAIMediaGroupsStmt,
 		getAIChatSettingsStmt:                 q.getAIChatSettingsStmt,
+		getAIMediaGroupStmt:                   q.getAIMediaGroupStmt,
+		getAIMediaGroupByMessageStmt:          q.getAIMediaGroupByMessageStmt,
 		getAIMigrationStatsStmt:               q.getAIMigrationStatsStmt,
 		getAIRunStmt:                          q.getAIRunStmt,
 		getAIRunByRequestStmt:                 q.getAIRunByRequestStmt,
@@ -438,6 +495,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		incrementAISessionUsageStmt:           q.incrementAISessionUsageStmt,
 		insertAIMessageStmt:                   q.insertAIMessageStmt,
 		insertMediaObjectStmt:                 q.insertMediaObjectStmt,
+		listAIMediaGroupPhotosStmt:            q.listAIMediaGroupPhotosStmt,
 		listAIMessageMediaStmt:                q.listAIMessageMediaStmt,
 		listAISessionAssistantRunsStmt:        q.listAISessionAssistantRunsStmt,
 		listAISessionMessagesStmt:             q.listAISessionMessagesStmt,
@@ -452,6 +510,8 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		toggleAIChatSettingsUsageStmt:         q.toggleAIChatSettingsUsageStmt,
 		touchAISessionStmt:                    q.touchAISessionStmt,
 		upsertAIChatSettingsStmt:              q.upsertAIChatSettingsStmt,
+		upsertAIMediaGroupStmt:                q.upsertAIMediaGroupStmt,
+		upsertAIMediaGroupPhotoStmt:           q.upsertAIMediaGroupPhotoStmt,
 		upsertAISessionProviderStateStmt:      q.upsertAISessionProviderStateStmt,
 		upsertAISystemPromptStmt:              q.upsertAISystemPromptStmt,
 	}

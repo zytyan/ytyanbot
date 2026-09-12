@@ -16,6 +16,27 @@ type AiChatSetting struct {
 	UpdatedAt       int64  `json:"updated_at"`
 }
 
+type AiMediaGroup struct {
+	ChatID       int64  `json:"chat_id"`
+	MediaGroupID string `json:"media_group_id"`
+	FirstSeenAt  int64  `json:"first_seen_at"`
+	UpdatedAt    int64  `json:"updated_at"`
+	ExpiresAt    int64  `json:"expires_at"`
+	PhotoOnly    int64  `json:"photo_only"`
+}
+
+type AiMediaGroupPhoto struct {
+	ChatID         int64          `json:"chat_id"`
+	MediaGroupID   string         `json:"media_group_id"`
+	MsgID          int64          `json:"msg_id"`
+	SentAt         int64          `json:"sent_at"`
+	UserID         int64          `json:"user_id"`
+	Username       string         `json:"username"`
+	AtableUsername sql.NullString `json:"atable_username"`
+	Caption        sql.NullString `json:"caption"`
+	TelegramFileID string         `json:"telegram_file_id"`
+}
+
 type AiMessage struct {
 	ChatID         int64          `json:"chat_id"`
 	MsgID          int64          `json:"msg_id"`

@@ -139,6 +139,25 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 	msg := ctx.EffectiveMessage
 	genCtx, cancel := context.WithTimeout(context.Background(), time.Minute*15)
 	defer cancel()
+	if msg.MediaGroupId != "" {
+		key := aiMediaGroupKey{chatID: msg.Chat.Id, mediaGroupID: msg.MediaGroupId}
+		if !claimAIMediaGroup(key) {
+			return nil
+		}
+		if err := waitForAIMediaGroup(genCtx, key); err != nil {
+			return err
+		}
+		group, err := g.AIQ.GetAIMediaGroup(genCtx, msg.Chat.Id, msg.MediaGroupId)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				err = ErrAIMediaGroupUnavailable
+			}
+			return replyAIMediaGroupError(bot, msg, err)
+		}
+		if err = validateAIMediaGroup(group, time.Now()); err != nil {
+			return replyAIMediaGroupError(bot, msg, err)
+		}
+	}
 	text := msg.GetText()
 	createNewSession, ignoreSessionTimeout, replySessionId := parseSessionRouting(text)
 	session := GeminiGetSession(genCtx, msg, createNewSession, ignoreSessionTimeout, replySessionId)
@@ -167,6 +186,10 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 		ThinkingConfig: &genai.ThinkingConfig{IncludeThoughts: true},
 	}
 	if err := session.AddTgMessageWithReplyMode(genCtx, bot, ctx.EffectiveMessage, createNewSession); err != nil {
+		if errors.Is(err, ErrAIMediaGroupUnavailable) || errors.Is(err, ErrAIMediaGroupMixed) ||
+			errors.Is(err, ErrAIMediaGroupDownload) {
+			return replyAIMediaGroupError(bot, msg, err)
+		}
 		return err
 	}
 	defer session.DiscardTmpUpdates()
@@ -249,6 +272,12 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 	}
 	deliveryCommitted = true
 	return nil
+}
+
+func replyAIMediaGroupError(bot *gotgbot.Bot, msg *gotgbot.Message, err error) error {
+	setReaction(bot, msg, "🤔")
+	_, replyErr := msg.Reply(bot, err.Error(), nil)
+	return replyErr
 }
 
 func generateGemini(ctx context.Context, session *GeminiSession, config *genai.GenerateContentConfig) (res *genai.GenerateContentResponse, err error) {

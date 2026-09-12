@@ -82,6 +82,13 @@ picture rating constraints v9
 - preserve every valid picture, rating, aggregate, random key, and counter row exactly
 `
 
+const AIMediaGroupRetentionV10Source = `
+ai media group retention v10
+- persist Telegram media group metadata and photo file identifiers for AI chats
+- mark mixed media groups so partial albums are never sent to a provider
+- index seven-day expiry cleanup and cascade group deletion to cached photo metadata
+`
+
 var AIV2OfflineSource = aiV2OfflineDescription + "\n" + legacyschema.V2V3
 
 var All = []Definition{
@@ -94,6 +101,7 @@ var All = []Definition{
 	{Version: 7, Name: "ytdl_cache_lookup", Source: YTDLCacheLookupV7Source},
 	{Version: 8, Name: "bili_inline_retention", Source: BiliInlineRetentionV8Source},
 	{Version: 9, Name: "picture_rating_constraints", Source: PictureRatingConstraintsV9Source, Offline: true},
+	{Version: 10, Name: "ai_media_group_retention", Source: AIMediaGroupRetentionV10Source},
 }
 
 func Checksum(source string) string {

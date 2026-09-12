@@ -108,6 +108,50 @@ JOIN ai_message_media mm ON mm.media_sha256=m.sha256
 WHERE mm.chat_id=? AND mm.msg_id=?
 ORDER BY mm.ordinal;
 
+-- name: UpsertAIMediaGroup :exec
+INSERT INTO ai_media_groups(chat_id, media_group_id, first_seen_at, updated_at, expires_at, photo_only)
+VALUES (sqlc.arg(chat_id), sqlc.arg(media_group_id), sqlc.arg(first_seen_at),
+        sqlc.arg(updated_at), sqlc.arg(expires_at), sqlc.arg(photo_only))
+ON CONFLICT(chat_id, media_group_id) DO UPDATE SET
+    first_seen_at=MIN(ai_media_groups.first_seen_at, excluded.first_seen_at),
+    updated_at=MAX(ai_media_groups.updated_at, excluded.updated_at),
+    expires_at=MAX(ai_media_groups.expires_at, excluded.expires_at),
+    photo_only=ai_media_groups.photo_only AND excluded.photo_only;
+
+-- name: UpsertAIMediaGroupPhoto :exec
+INSERT INTO ai_media_group_photos(chat_id, media_group_id, msg_id, sent_at, user_id,
+                                  username, atable_username, caption, telegram_file_id)
+VALUES (sqlc.arg(chat_id), sqlc.arg(media_group_id), sqlc.arg(msg_id), sqlc.arg(sent_at),
+        sqlc.arg(user_id), sqlc.arg(username), sqlc.narg(atable_username),
+        sqlc.narg(caption), sqlc.arg(telegram_file_id))
+ON CONFLICT(chat_id, msg_id) DO UPDATE SET
+    media_group_id=excluded.media_group_id,
+    sent_at=excluded.sent_at,
+    user_id=excluded.user_id,
+    username=excluded.username,
+    atable_username=excluded.atable_username,
+    caption=excluded.caption,
+    telegram_file_id=excluded.telegram_file_id;
+
+-- name: GetAIMediaGroupByMessage :one
+SELECT g.*
+FROM ai_media_groups g
+JOIN ai_media_group_photos p
+  ON p.chat_id=g.chat_id AND p.media_group_id=g.media_group_id
+WHERE p.chat_id=sqlc.arg(chat_id) AND p.msg_id=sqlc.arg(msg_id);
+
+-- name: GetAIMediaGroup :one
+SELECT * FROM ai_media_groups
+WHERE chat_id=sqlc.arg(chat_id) AND media_group_id=sqlc.arg(media_group_id);
+
+-- name: ListAIMediaGroupPhotos :many
+SELECT * FROM ai_media_group_photos
+WHERE chat_id=sqlc.arg(chat_id) AND media_group_id=sqlc.arg(media_group_id)
+ORDER BY msg_id;
+
+-- name: DeleteExpiredAIMediaGroups :execrows
+DELETE FROM ai_media_groups WHERE expires_at <= sqlc.arg(expires_at);
+
 -- name: AddAISessionMessage :exec
 INSERT INTO ai_session_messages(session_id, position, chat_id, msg_id, role, quote_part, context_only)
 VALUES (sqlc.arg(session_id), sqlc.arg(position), sqlc.arg(chat_id), sqlc.arg(msg_id),

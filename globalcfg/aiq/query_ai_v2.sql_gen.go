@@ -246,6 +246,18 @@ func (q *Queries) DeleteAISystemPrompt(ctx context.Context, chatID int64, topicI
 	return err
 }
 
+const deleteExpiredAIMediaGroups = `-- name: DeleteExpiredAIMediaGroups :execrows
+DELETE FROM ai_media_groups WHERE expires_at <= ?1
+`
+
+func (q *Queries) DeleteExpiredAIMediaGroups(ctx context.Context, expiresAt int64) (int64, error) {
+	result, err := q.exec(ctx, q.deleteExpiredAIMediaGroupsStmt, deleteExpiredAIMediaGroups, expiresAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getAIChatSettings = `-- name: GetAIChatSettings :one
 SELECT chat_id, default_provider, default_model, show_usage, updated_at FROM ai_chat_settings WHERE chat_id = ?
 `
@@ -259,6 +271,47 @@ func (q *Queries) GetAIChatSettings(ctx context.Context, chatID int64) (AiChatSe
 		&i.DefaultModel,
 		&i.ShowUsage,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAIMediaGroup = `-- name: GetAIMediaGroup :one
+SELECT chat_id, media_group_id, first_seen_at, updated_at, expires_at, photo_only FROM ai_media_groups
+WHERE chat_id=?1 AND media_group_id=?2
+`
+
+func (q *Queries) GetAIMediaGroup(ctx context.Context, chatID int64, mediaGroupID string) (AiMediaGroup, error) {
+	row := q.queryRow(ctx, q.getAIMediaGroupStmt, getAIMediaGroup, chatID, mediaGroupID)
+	var i AiMediaGroup
+	err := row.Scan(
+		&i.ChatID,
+		&i.MediaGroupID,
+		&i.FirstSeenAt,
+		&i.UpdatedAt,
+		&i.ExpiresAt,
+		&i.PhotoOnly,
+	)
+	return i, err
+}
+
+const getAIMediaGroupByMessage = `-- name: GetAIMediaGroupByMessage :one
+SELECT g.chat_id, g.media_group_id, g.first_seen_at, g.updated_at, g.expires_at, g.photo_only
+FROM ai_media_groups g
+JOIN ai_media_group_photos p
+  ON p.chat_id=g.chat_id AND p.media_group_id=g.media_group_id
+WHERE p.chat_id=?1 AND p.msg_id=?2
+`
+
+func (q *Queries) GetAIMediaGroupByMessage(ctx context.Context, chatID int64, msgID int64) (AiMediaGroup, error) {
+	row := q.queryRow(ctx, q.getAIMediaGroupByMessageStmt, getAIMediaGroupByMessage, chatID, msgID)
+	var i AiMediaGroup
+	err := row.Scan(
+		&i.ChatID,
+		&i.MediaGroupID,
+		&i.FirstSeenAt,
+		&i.UpdatedAt,
+		&i.ExpiresAt,
+		&i.PhotoOnly,
 	)
 	return i, err
 }
@@ -617,6 +670,45 @@ func (q *Queries) InsertMediaObject(ctx context.Context, arg InsertMediaObjectPa
 		arg.CreatedAt,
 	)
 	return err
+}
+
+const listAIMediaGroupPhotos = `-- name: ListAIMediaGroupPhotos :many
+SELECT chat_id, media_group_id, msg_id, sent_at, user_id, username, atable_username, caption, telegram_file_id FROM ai_media_group_photos
+WHERE chat_id=?1 AND media_group_id=?2
+ORDER BY msg_id
+`
+
+func (q *Queries) ListAIMediaGroupPhotos(ctx context.Context, chatID int64, mediaGroupID string) ([]AiMediaGroupPhoto, error) {
+	rows, err := q.query(ctx, q.listAIMediaGroupPhotosStmt, listAIMediaGroupPhotos, chatID, mediaGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AiMediaGroupPhoto
+	for rows.Next() {
+		var i AiMediaGroupPhoto
+		if err := rows.Scan(
+			&i.ChatID,
+			&i.MediaGroupID,
+			&i.MsgID,
+			&i.SentAt,
+			&i.UserID,
+			&i.Username,
+			&i.AtableUsername,
+			&i.Caption,
+			&i.TelegramFileID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAIMessageMedia = `-- name: ListAIMessageMedia :many
@@ -1054,6 +1146,81 @@ func (q *Queries) UpsertAIChatSettings(ctx context.Context, arg UpsertAIChatSett
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const upsertAIMediaGroup = `-- name: UpsertAIMediaGroup :exec
+INSERT INTO ai_media_groups(chat_id, media_group_id, first_seen_at, updated_at, expires_at, photo_only)
+VALUES (?1, ?2, ?3,
+        ?4, ?5, ?6)
+ON CONFLICT(chat_id, media_group_id) DO UPDATE SET
+    first_seen_at=MIN(ai_media_groups.first_seen_at, excluded.first_seen_at),
+    updated_at=MAX(ai_media_groups.updated_at, excluded.updated_at),
+    expires_at=MAX(ai_media_groups.expires_at, excluded.expires_at),
+    photo_only=ai_media_groups.photo_only AND excluded.photo_only
+`
+
+type UpsertAIMediaGroupParams struct {
+	ChatID       int64  `json:"chat_id"`
+	MediaGroupID string `json:"media_group_id"`
+	FirstSeenAt  int64  `json:"first_seen_at"`
+	UpdatedAt    int64  `json:"updated_at"`
+	ExpiresAt    int64  `json:"expires_at"`
+	PhotoOnly    int64  `json:"photo_only"`
+}
+
+func (q *Queries) UpsertAIMediaGroup(ctx context.Context, arg UpsertAIMediaGroupParams) error {
+	_, err := q.exec(ctx, q.upsertAIMediaGroupStmt, upsertAIMediaGroup,
+		arg.ChatID,
+		arg.MediaGroupID,
+		arg.FirstSeenAt,
+		arg.UpdatedAt,
+		arg.ExpiresAt,
+		arg.PhotoOnly,
+	)
+	return err
+}
+
+const upsertAIMediaGroupPhoto = `-- name: UpsertAIMediaGroupPhoto :exec
+INSERT INTO ai_media_group_photos(chat_id, media_group_id, msg_id, sent_at, user_id,
+                                  username, atable_username, caption, telegram_file_id)
+VALUES (?1, ?2, ?3, ?4,
+        ?5, ?6, ?7,
+        ?8, ?9)
+ON CONFLICT(chat_id, msg_id) DO UPDATE SET
+    media_group_id=excluded.media_group_id,
+    sent_at=excluded.sent_at,
+    user_id=excluded.user_id,
+    username=excluded.username,
+    atable_username=excluded.atable_username,
+    caption=excluded.caption,
+    telegram_file_id=excluded.telegram_file_id
+`
+
+type UpsertAIMediaGroupPhotoParams struct {
+	ChatID         int64          `json:"chat_id"`
+	MediaGroupID   string         `json:"media_group_id"`
+	MsgID          int64          `json:"msg_id"`
+	SentAt         int64          `json:"sent_at"`
+	UserID         int64          `json:"user_id"`
+	Username       string         `json:"username"`
+	AtableUsername sql.NullString `json:"atable_username"`
+	Caption        sql.NullString `json:"caption"`
+	TelegramFileID string         `json:"telegram_file_id"`
+}
+
+func (q *Queries) UpsertAIMediaGroupPhoto(ctx context.Context, arg UpsertAIMediaGroupPhotoParams) error {
+	_, err := q.exec(ctx, q.upsertAIMediaGroupPhotoStmt, upsertAIMediaGroupPhoto,
+		arg.ChatID,
+		arg.MediaGroupID,
+		arg.MsgID,
+		arg.SentAt,
+		arg.UserID,
+		arg.Username,
+		arg.AtableUsername,
+		arg.Caption,
+		arg.TelegramFileID,
+	)
+	return err
 }
 
 const upsertAISessionProviderState = `-- name: UpsertAISessionProviderState :exec

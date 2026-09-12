@@ -141,6 +141,40 @@ CREATE INDEX idx_bili_inline_results_created_at ON bili_inline_results(created_a
 		Offline: true,
 		Run:     migratePictureRatingConstraints,
 	},
+	{
+		Version: 10,
+		Name:    "ai_media_group_retention",
+		Source:  migrationdefs.AIMediaGroupRetentionV10Source,
+		Run: func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, `
+CREATE TABLE ai_media_groups(
+    chat_id INTEGER NOT NULL,
+    media_group_id TEXT NOT NULL CHECK(length(media_group_id) > 0),
+    first_seen_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    photo_only INTEGER NOT NULL DEFAULT 1 CHECK(photo_only IN (0, 1)),
+    PRIMARY KEY(chat_id, media_group_id)
+) WITHOUT ROWID, STRICT;
+CREATE INDEX idx_ai_media_groups_expires_at ON ai_media_groups(expires_at);
+CREATE TABLE ai_media_group_photos(
+    chat_id INTEGER NOT NULL,
+    media_group_id TEXT NOT NULL,
+    msg_id INTEGER NOT NULL,
+    sent_at INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    atable_username TEXT,
+    caption TEXT,
+    telegram_file_id TEXT NOT NULL CHECK(length(telegram_file_id) > 0),
+    PRIMARY KEY(chat_id, msg_id),
+    UNIQUE(chat_id, media_group_id, msg_id),
+    FOREIGN KEY(chat_id, media_group_id) REFERENCES ai_media_groups(chat_id, media_group_id) ON DELETE CASCADE
+) WITHOUT ROWID, STRICT;
+CREATE INDEX idx_ai_media_group_photos_group ON ai_media_group_photos(chat_id, media_group_id, msg_id);`)
+			return err
+		},
+	},
 }
 
 func All() []Migration {

@@ -19,7 +19,7 @@ func TestInitializeCreatesOnlyCanonicalTables(t *testing.T) {
 
 	var migrations int64
 	require.NoError(t, database.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrations))
-	require.Equal(t, int64(9), migrations)
+	require.Equal(t, int64(10), migrations)
 	require.ErrorContains(t, Initialize(context.Background(), database), "not empty")
 }
 

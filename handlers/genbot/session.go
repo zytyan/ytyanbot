@@ -434,6 +434,68 @@ func (s *GeminiSession) setMessageRole(msgID int64, role string) {
 	}
 }
 
+func (s *GeminiSession) addAIMediaGroup(ctx context.Context, bot *gotgbot.Bot,
+	group aiq.AiMediaGroup, contextOnly bool,
+) error {
+	if err := validateAIMediaGroup(group, time.Now()); err != nil {
+		return err
+	}
+	photos, err := g.AIQ.ListAIMediaGroupPhotos(ctx, group.ChatID, group.MediaGroupID)
+	if err != nil {
+		return err
+	}
+	if len(photos) == 0 {
+		return ErrAIMediaGroupUnavailable
+	}
+	contents := make([]q.GeminiContent, 0, len(photos))
+	for _, photo := range photos {
+		if s.containsMessage(photo.MsgID) {
+			continue
+		}
+		data, downloadErr := h.DownloadToMemoryCached(bot, photo.TelegramFileID)
+		if downloadErr != nil {
+			return fmt.Errorf("%w（消息 %d）: %v", ErrAIMediaGroupDownload, photo.MsgID, downloadErr)
+		}
+		contents = append(contents, q.GeminiContent{
+			SessionID: s.ID, ChatID: photo.ChatID, MsgID: photo.MsgID, Role: genai.RoleUser,
+			SentTime: q.UnixTime{Time: time.Unix(photo.SentAt, 0)}, Username: photo.Username,
+			MsgType: "photo", Text: photo.Caption, Blob: data,
+			MimeType:       sql.NullString{String: "image/jpeg", Valid: true},
+			AtableUsername: photo.AtableUsername, UserID: photo.UserID,
+		})
+	}
+	if len(contents) == 0 {
+		return nil
+	}
+	s.TmpContents = append(s.TmpContents, contents...)
+	if contextOnly {
+		if s.TmpContextOnlyMsgIDs == nil {
+			s.TmpContextOnlyMsgIDs = make(map[int64]struct{})
+		}
+		for _, content := range contents {
+			s.TmpContextOnlyMsgIDs[content.MsgID] = struct{}{}
+		}
+	}
+	return nil
+}
+
+func (s *GeminiSession) mediaGroupForReply(ctx context.Context, msg *gotgbot.Message) (aiq.AiMediaGroup, bool, error) {
+	if msg == nil || (msg.MediaGroupId == "" && len(msg.Photo) == 0) {
+		return aiq.AiMediaGroup{}, false, nil
+	}
+	group, err := g.AIQ.GetAIMediaGroupByMessage(ctx, msg.Chat.Id, msg.MessageId)
+	if err == nil {
+		return group, true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return aiq.AiMediaGroup{}, false, err
+	}
+	if msg.MediaGroupId != "" {
+		return aiq.AiMediaGroup{}, false, ErrAIMediaGroupUnavailable
+	}
+	return aiq.AiMediaGroup{}, false, nil
+}
+
 // AddTgMessageWithReply appends a directly replied-to message when it is not
 // already part of the active chain, then appends the current user message.
 func (s *GeminiSession) AddTgMessageWithReply(ctx context.Context, bot *gotgbot.Bot, msg *gotgbot.Message) error {
@@ -460,7 +522,28 @@ func (s *GeminiSession) AddTgMessageWithReplyMode(ctx context.Context, bot *gotg
 			s.setMessageRole(replied.MessageId, genai.RoleUser)
 		}
 	}
+	repliedAlbumAdded := false
 	if replied := msg.ReplyToMessage; replied != nil && !s.containsMessage(replied.MessageId) {
+		group, found, err := s.mediaGroupForReply(ctx, replied)
+		if err != nil {
+			return err
+		}
+		if found {
+			contextOnly := replyContextOnly
+			if !contextOnly {
+				_, lookupErr := g.AIQ.GetAISessionIDByMessage(ctx, msg.Chat.Id, replied.MessageId)
+				contextOnly = lookupErr == nil
+				if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+					return lookupErr
+				}
+			}
+			if err = s.addAIMediaGroup(ctx, bot, group, contextOnly); err != nil {
+				return err
+			}
+			repliedAlbumAdded = true
+		}
+	}
+	if replied := msg.ReplyToMessage; replied != nil && !s.containsMessage(replied.MessageId) && !repliedAlbumAdded {
 		// A stored message may have fallen out of the active sliding window. It is
 		// The Telegram message body is global while session membership is
 		// many-to-many. @new marks the replied message as request-only context so
@@ -514,6 +597,16 @@ func (s *GeminiSession) AddTgMessageWithReplyMode(ctx context.Context, bot *gotg
 			}
 			s.TmpContextOnlyMsgIDs[replied.MessageId] = struct{}{}
 		}
+	}
+	if msg.MediaGroupId != "" {
+		group, err := g.AIQ.GetAIMediaGroup(ctx, msg.Chat.Id, msg.MediaGroupId)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrAIMediaGroupUnavailable
+			}
+			return err
+		}
+		return s.addAIMediaGroup(ctx, bot, group, false)
 	}
 	return s.AddTgMessage(bot, msg)
 }

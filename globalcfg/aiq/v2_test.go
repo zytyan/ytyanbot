@@ -176,3 +176,40 @@ VALUES (?, 'bad', -1, 'image/jpeg', 1)`, strings.Repeat("b", 64))
 	require.NoError(t, err)
 	require.Equal(t, "prompt", prompt)
 }
+
+func TestAIMediaGroupQueriesRetainPurePhotosAndExpireAtomically(t *testing.T) {
+	database, queries := openV2TestQueries(t)
+	ctx := context.Background()
+	require.NoError(t, queries.UpsertAIMediaGroup(ctx, UpsertAIMediaGroupParams{
+		ChatID: -2001, MediaGroupID: "album", FirstSeenAt: 101, UpdatedAt: 101,
+		ExpiresAt: 701, PhotoOnly: 1,
+	}))
+	require.NoError(t, queries.UpsertAIMediaGroupPhoto(ctx, UpsertAIMediaGroupPhotoParams{
+		ChatID: -2001, MediaGroupID: "album", MsgID: 12, SentAt: 102, UserID: 7,
+		Username: "Alice", Caption: sql.NullString{String: "second", Valid: true}, TelegramFileID: "file-12",
+	}))
+	require.NoError(t, queries.UpsertAIMediaGroupPhoto(ctx, UpsertAIMediaGroupPhotoParams{
+		ChatID: -2001, MediaGroupID: "album", MsgID: 11, SentAt: 101, UserID: 7,
+		Username: "Alice", TelegramFileID: "file-11",
+	}))
+	// A later non-photo update permanently marks the group mixed.
+	require.NoError(t, queries.UpsertAIMediaGroup(ctx, UpsertAIMediaGroupParams{
+		ChatID: -2001, MediaGroupID: "album", FirstSeenAt: 103, UpdatedAt: 103,
+		ExpiresAt: 703, PhotoOnly: 0,
+	}))
+	group, err := queries.GetAIMediaGroupByMessage(ctx, -2001, 11)
+	require.NoError(t, err)
+	require.Zero(t, group.PhotoOnly)
+	require.Equal(t, int64(101), group.FirstSeenAt)
+	require.Equal(t, int64(703), group.ExpiresAt)
+	photos, err := queries.ListAIMediaGroupPhotos(ctx, -2001, "album")
+	require.NoError(t, err)
+	require.Equal(t, []int64{11, 12}, []int64{photos[0].MsgID, photos[1].MsgID})
+
+	deleted, err := queries.DeleteExpiredAIMediaGroups(ctx, 703)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), deleted)
+	var count int
+	require.NoError(t, database.QueryRow(`SELECT COUNT(*) FROM ai_media_group_photos`).Scan(&count))
+	require.Zero(t, count)
+}

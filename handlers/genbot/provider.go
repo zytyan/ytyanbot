@@ -26,6 +26,7 @@ const (
 
 const (
 	ProviderGemini   = "gemini"
+	ProviderSub2API  = "sub2api"
 	ProviderDeepSeek = "deepseek"
 
 	PayloadFormatGeminiContent          = "gemini-content-v1"
@@ -70,6 +71,7 @@ type modelOption struct {
 
 var modelOptions = []modelOption{
 	{Model: ModelGemini37Flash, Label: "Gemini 3.7 Flash", Provider: ProviderGemini},
+	{Model: ModelGemini37Flash, Label: "Gemini 3.7 Flash（Sub2API）", Provider: ProviderSub2API},
 	{Model: ModelGeminiFlash, Label: "Gemini 3 Flash Preview", Provider: ProviderGemini},
 	{Model: ModelGeminiFlashLite, Label: "Gemini 3.1 Flash-Lite", Provider: ProviderGemini},
 	{Model: ModelDeepSeekFlash, Label: "DeepSeek V4 Flash", Provider: ProviderDeepSeek},
@@ -77,9 +79,9 @@ var modelOptions = []modelOption{
 	{Model: ModelDeepSeek41Flash, Label: "DeepSeek V4.1 Flash（多模态内测）", Provider: ProviderDeepSeek},
 }
 
-func getModelOption(model string) (modelOption, bool) {
+func getModelOption(provider, model string) (modelOption, bool) {
 	for _, option := range modelOptions {
-		if option.Model == model {
+		if option.Provider == provider && option.Model == model {
 			return option, true
 		}
 	}
@@ -87,10 +89,16 @@ func getModelOption(model string) (modelOption, bool) {
 }
 
 func providerForModel(model string) string {
-	if option, ok := getModelOption(model); ok {
-		return option.Provider
+	for _, option := range modelOptions {
+		if option.Model == model {
+			return option.Provider
+		}
 	}
 	return ProviderGemini
+}
+
+func isNativeGeminiProvider(provider string) bool {
+	return provider == ProviderGemini || provider == ProviderSub2API
 }
 
 func configureGeminiThinking(model string, config *genai.GenerateContentConfig) {
@@ -108,9 +116,13 @@ func generateAI(ctx context.Context, session *GeminiSession, systemPrompt string
 	window := session.prepareRequestWindow()
 	var result *AIResult
 	var err error
-	if session.Provider == ProviderDeepSeek {
+	switch session.Provider {
+	case ProviderDeepSeek:
 		result, err = generateDeepSeek(ctx, session, systemPrompt, window)
-	} else {
+	case ProviderSub2API:
+		configureGeminiThinking(session.Model, geminiConfig)
+		result, err = generateSub2API(ctx, session, systemPrompt, geminiConfig, window)
+	default:
 		configureGeminiThinking(session.Model, geminiConfig)
 		result, err = generateGeminiWithCachePolicy(ctx, session, systemPrompt, geminiConfig, window)
 	}
@@ -124,6 +136,29 @@ func generateAI(ctx context.Context, session *GeminiSession, systemPrompt string
 		}
 	}
 	return result, err
+}
+
+func generateSub2API(ctx context.Context, session *GeminiSession, systemPrompt string,
+	config *genai.GenerateContentConfig, window aiRequestWindow,
+) (*AIResult, error) {
+	cfg := g.GetConfig()
+	if cfg.Sub2APIKey == "" {
+		return nil, errors.New("Sub2API Key 未配置")
+	}
+	return generateSub2APIWithClient(ctx, getSub2APIClient(), session, systemPrompt, config, window)
+}
+
+func generateSub2APIWithClient(ctx context.Context, client *genai.Client, session *GeminiSession,
+	systemPrompt string, config *genai.GenerateContentConfig, window aiRequestWindow,
+) (*AIResult, error) {
+	requestConfig := *config
+	requestConfig.SystemInstruction = genai.NewContentFromText(systemPrompt, genai.RoleModel)
+	contents := geminiContentsForWindow(session, window)
+	response, err := generateGeminiContentsWithClient(ctx, client, session.Model, contents, &requestConfig)
+	if err != nil {
+		return nil, err
+	}
+	return resultFromGeminiResponse(response)
 }
 
 func resultFromGeminiResponse(response *genai.GenerateContentResponse) (*AIResult, error) {

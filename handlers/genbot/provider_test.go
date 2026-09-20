@@ -12,6 +12,7 @@ import (
 	"main/globalcfg/q"
 	genai "main/handlers/genbot/geminiapi"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -279,6 +280,11 @@ func TestGeminiCompactPartsAndRawAssistantReplay(t *testing.T) {
 	contents := session.ToGenaiContents()
 	require.Len(t, contents, 3)
 	require.Equal(t, rawContent, contents[1])
+
+	session.AssistantPayloads[9] = g.AIAssistantPayload{
+		MsgID: 9, Provider: ProviderSub2API, Format: PayloadFormatGeminiContent, Payload: result.AssistantPayload,
+	}
+	require.Equal(t, rawContent, session.ToGenaiContents()[1])
 	require.Equal(t, "[ tester 1970-01-01 08:02:03 ]\nnext turn", contents[2].Parts[0].Text)
 
 	prefixSession := &GeminiSession{
@@ -728,34 +734,82 @@ func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error)
 	return fn(request)
 }
 
-func TestModelKeyboardMarksCurrent(t *testing.T) {
-	keyboard := modelKeyboard(ModelDeepSeekFlash, 12345)
-	require.Len(t, keyboard.InlineKeyboard, 6)
+func TestModelKeyboardMarksProviderAndModelCurrent(t *testing.T) {
+	keyboard := modelKeyboard(ProviderSub2API, ModelGemini37Flash, 12345)
+	require.Len(t, keyboard.InlineKeyboard, 7)
 	selected := 0
 	for _, row := range keyboard.InlineKeyboard {
 		if strings.HasPrefix(row[0].Text, "✅") {
 			selected++
-			require.Contains(t, row[0].Text, "DeepSeek V4 Flash")
+			require.Contains(t, row[0].Text, "Sub2API")
 		}
 		require.LessOrEqual(t, len(row[0].CallbackData), 64)
-		sessionID, model, ok := parseModelCallback(row[0].CallbackData)
+		sessionID, provider, model, ok := parseModelCallback(row[0].CallbackData)
 		require.True(t, ok)
 		require.Equal(t, int64(12345), sessionID)
+		require.NotEmpty(t, provider)
 		require.NotEmpty(t, model)
 	}
 	require.Equal(t, 1, selected)
-	legacySessionID, legacyModel, ok := parseModelCallback(modelCallbackPrefix + ModelGeminiFlash)
+
+	legacySessionID, legacyProvider, legacyModel, ok := parseModelCallback(modelCallbackPrefix + ModelGeminiFlash)
 	require.True(t, ok)
 	require.Zero(t, legacySessionID)
+	require.Equal(t, ProviderGemini, legacyProvider)
 	require.Equal(t, ModelGeminiFlash, legacyModel)
+
+	oldSessionID, oldProvider, oldModel, ok := parseModelCallback(
+		modelCallbackPrefix + "12345:" + ModelGemini37Flash)
+	require.True(t, ok)
+	require.Equal(t, int64(12345), oldSessionID)
+	require.Equal(t, ProviderGemini, oldProvider)
+	require.Equal(t, ModelGemini37Flash, oldModel)
 }
 
-func TestGemini37FlashModelOption(t *testing.T) {
-	option, ok := getModelOption(ModelGemini37Flash)
+func TestGemini37FlashModelOptionsAreProviderSpecific(t *testing.T) {
+	official, ok := getModelOption(ProviderGemini, ModelGemini37Flash)
 	require.True(t, ok)
-	require.Equal(t, "gemini-3.7-flash", option.Model)
-	require.Equal(t, "Gemini 3.7 Flash", option.Label)
-	require.Equal(t, ProviderGemini, option.Provider)
+	require.Equal(t, "Gemini 3.7 Flash", official.Label)
+
+	sub2api, ok := getModelOption(ProviderSub2API, ModelGemini37Flash)
+	require.True(t, ok)
+	require.Equal(t, "Gemini 3.7 Flash（Sub2API）", sub2api.Label)
+	require.Equal(t, ProviderSub2API, sub2api.Provider)
+}
+
+func TestGenerateSub2APIUsesNativeGeminiEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		require.Equal(t, "/v1beta/models/gemini-3.7-flash:generateContent", request.URL.Path)
+		require.Equal(t, "test-key", request.Header.Get("x-goog-api-key"))
+		var payload struct {
+			Contents          []*genai.Content `json:"contents"`
+			SystemInstruction *genai.Content   `json:"systemInstruction"`
+		}
+		require.NoError(t, json.NewDecoder(request.Body).Decode(&payload))
+		require.NotNil(t, payload.SystemInstruction)
+		require.Equal(t, "system prompt", payload.SystemInstruction.Parts[0].Text)
+		require.Len(t, payload.Contents, 1)
+		_, _ = io.WriteString(response, "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"sub2api ok\"}]}}],\"usageMetadata\":{\"promptTokenCount\":11,\"candidatesTokenCount\":3}}")
+	}))
+	defer server.Close()
+
+	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{
+		APIKey: "test-key", Backend: genai.BackendGeminiAPI, BaseURL: server.URL + "/v1beta",
+	})
+	require.NoError(t, err)
+	session := &GeminiSession{
+		TmpContents: []q.GeminiContent{testContent("text", "hello")},
+		Provider:    ProviderSub2API, Model: ModelGemini37Flash,
+		AssistantPayloads: map[int64]g.AIAssistantPayload{},
+	}
+	config := &genai.GenerateContentConfig{ThinkingConfig: &genai.ThinkingConfig{IncludeThoughts: true}}
+	result, err := generateSub2APIWithClient(context.Background(), client, session, "system prompt", config,
+		aiRequestWindow{Contents: session.TmpContents})
+	require.NoError(t, err)
+	require.Equal(t, "sub2api ok", result.DisplayText)
+	require.Equal(t, PayloadFormatGeminiContent, result.AssistantPayloadFormat)
+	require.Equal(t, int64(11), result.Usage.InputTokens)
+	require.Equal(t, int64(3), result.Usage.OutputTokens)
 }
 
 func TestGemini3FlashDefaultsToLowThinkingWithoutOverridingExplicitLevel(t *testing.T) {

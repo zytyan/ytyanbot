@@ -109,12 +109,12 @@ func fallbackGeminiAssistant(content *q.GeminiContent) *genai.Content {
 
 func databaseContentToGenaiPart(content *q.GeminiContent, payloads map[int64]g.AIAssistantPayload) (out *genai.Content) {
 	if content.Role == genai.RoleModel {
-		if payload, ok := payloads[content.MsgID]; ok && payload.Provider == ProviderGemini && payload.Format == PayloadFormatGeminiContent {
+		if payload, ok := payloads[content.MsgID]; ok && isNativeGeminiProvider(payload.Provider) && payload.Format == PayloadFormatGeminiContent {
 			var saved genai.Content
 			if err := json.Unmarshal(payload.Payload, &saved); err == nil {
 				return &saved
 			} else {
-				warnInvalidAssistantPayload(ProviderGemini, content.MsgID, err)
+				warnInvalidAssistantPayload(payload.Provider, content.MsgID, err)
 			}
 		}
 		return fallbackGeminiAssistant(content)

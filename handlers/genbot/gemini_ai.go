@@ -56,8 +56,28 @@ var client = g.NewPtrLinkedCfg(
 	},
 )
 
+var sub2APIClient = g.NewPtrLinkedCfg(
+	func(old, new *g.Config) bool {
+		return old.Sub2APIKey != new.Sub2APIKey || old.Sub2APIBaseURL != new.Sub2APIBaseURL
+	},
+	func(new *g.Config) *genai.Client {
+		ctx := context.Background()
+		c, err := genai.NewClient(ctx, &genai.ClientConfig{
+			APIKey: new.Sub2APIKey, Backend: genai.BackendGeminiAPI, BaseURL: new.Sub2APIBaseURL,
+		})
+		if err != nil {
+			panic(err)
+		}
+		return c
+	},
+)
+
 func getGenAiClient() *genai.Client {
 	return client.Get()
+}
+
+func getSub2APIClient() *genai.Client {
+	return sub2APIClient.Get()
 }
 
 const (

@@ -32,7 +32,7 @@ func canChangeModel(bot *gotgbot.Bot, chat *gotgbot.Chat, userID int64) (bool, e
 	return status == "administrator" || status == "creator", nil
 }
 
-func modelKeyboard(current string, targetSessionID ...int64) gotgbot.InlineKeyboardMarkup {
+func modelKeyboard(currentProvider, currentModel string, targetSessionID ...int64) gotgbot.InlineKeyboardMarkup {
 	sessionID := int64(0)
 	if len(targetSessionID) > 0 {
 		sessionID = targetSessionID[0]
@@ -40,35 +40,41 @@ func modelKeyboard(current string, targetSessionID ...int64) gotgbot.InlineKeybo
 	rows := make([][]gotgbot.InlineKeyboardButton, 0, len(modelOptions))
 	for _, option := range modelOptions {
 		label := option.Label
-		if option.Model == current {
+		if option.Provider == currentProvider && option.Model == currentModel {
 			label = "✅ " + label
 		}
 		rows = append(rows, []gotgbot.InlineKeyboardButton{{
-			Text: label, CallbackData: modelCallbackData(sessionID, option.Model),
+			Text: label, CallbackData: modelCallbackData(sessionID, option.Provider, option.Model),
 		}})
 	}
 	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-func modelCallbackData(sessionID int64, model string) string {
-	return fmt.Sprintf("%s%d:%s", modelCallbackPrefix, sessionID, model)
+func modelCallbackData(sessionID int64, provider, model string) string {
+	return fmt.Sprintf("%s%d:%s:%s", modelCallbackPrefix, sessionID, provider, model)
 }
 
-func parseModelCallback(data string) (sessionID int64, model string, ok bool) {
+func parseModelCallback(data string) (sessionID int64, provider, model string, ok bool) {
 	if !strings.HasPrefix(data, modelCallbackPrefix) {
-		return 0, "", false
+		return 0, "", "", false
 	}
 	payload := strings.TrimPrefix(data, modelCallbackPrefix)
-	parts := strings.SplitN(payload, ":", 2)
+	parts := strings.Split(payload, ":")
 	if len(parts) == 1 {
 		// Keep buttons sent by older bot versions working.
-		return 0, parts[0], parts[0] != ""
+		return 0, providerForModel(parts[0]), parts[0], parts[0] != ""
 	}
 	sessionID, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || sessionID < 0 || parts[1] == "" {
-		return 0, "", false
+	if err != nil || sessionID < 0 {
+		return 0, "", "", false
 	}
-	return sessionID, parts[1], true
+	if len(parts) == 2 && parts[1] != "" {
+		return sessionID, providerForModel(parts[1]), parts[1], true
+	}
+	if len(parts) == 3 && parts[1] != "" && parts[2] != "" {
+		return sessionID, parts[1], parts[2], true
+	}
+	return 0, "", "", false
 }
 
 func ChangeGeminiModel(bot *gotgbot.Bot, ctx *ext.Context) error {
@@ -86,7 +92,8 @@ func ChangeGeminiModel(bot *gotgbot.Bot, ctx *ext.Context) error {
 	}
 	requestCtx := context.Background()
 	sessionID := int64(0)
-	model, err := g.GetAIChatModel(requestCtx, msg.Chat.Id, defaultAIModel)
+	provider, model, err := g.GetAIChatSelection(requestCtx, msg.Chat.Id,
+		providerForModel(defaultAIModel), defaultAIModel)
 	if err != nil {
 		return err
 	}
@@ -100,11 +107,12 @@ func ChangeGeminiModel(bot *gotgbot.Bot, ctx *ext.Context) error {
 		if err != nil {
 			return err
 		}
-		_, model, err = g.GetAISessionModel(requestCtx, sessionID)
+		provider, model, err = g.GetAISessionModel(requestCtx, sessionID)
 		if errors.Is(err, sql.ErrNoRows) {
-			model, err = g.GetAIChatModel(requestCtx, msg.Chat.Id, defaultAIModel)
+			provider, model, err = g.GetAIChatSelection(requestCtx, msg.Chat.Id,
+				providerForModel(defaultAIModel), defaultAIModel)
 			if err == nil {
-				err = g.SetAISessionModel(requestCtx, sessionID, providerForModel(model), model)
+				err = g.SetAISessionModel(requestCtx, sessionID, provider, model)
 			}
 		}
 		if err != nil {
@@ -113,7 +121,7 @@ func ChangeGeminiModel(bot *gotgbot.Bot, ctx *ext.Context) error {
 		prompt = fmt.Sprintf("请选择历史会话 #%d 使用的 AI 模型：", sessionID)
 	}
 	_, err = msg.Reply(bot, prompt, &gotgbot.SendMessageOpts{
-		ReplyMarkup: modelKeyboard(model, sessionID),
+		ReplyMarkup: modelKeyboard(provider, model, sessionID),
 	})
 	return err
 }
@@ -127,12 +135,12 @@ func ChangeModelByButton(bot *gotgbot.Bot, ctx *ext.Context) error {
 	if msg == nil {
 		return errors.New("模型回调缺少消息")
 	}
-	sessionID, model, validCallback := parseModelCallback(ctx.CallbackQuery.Data)
+	sessionID, provider, model, validCallback := parseModelCallback(ctx.CallbackQuery.Data)
 	if !validCallback {
 		_, _ = ctx.CallbackQuery.Answer(bot, &gotgbot.AnswerCallbackQueryOpts{Text: "无效模型切换请求", ShowAlert: true})
 		return errors.New("invalid model callback payload")
 	}
-	option, ok := getModelOption(model)
+	option, ok := getModelOption(provider, model)
 	if !ok {
 		_, _ = ctx.CallbackQuery.Answer(bot, &gotgbot.AnswerCallbackQueryOpts{Text: "无效模型", ShowAlert: true})
 		return errors.New("invalid model callback")
@@ -149,6 +157,10 @@ func ChangeModelByButton(bot *gotgbot.Bot, ctx *ext.Context) error {
 		_, _ = ctx.CallbackQuery.Answer(bot, &gotgbot.AnswerCallbackQueryOpts{Text: "DeepSeek API Key 未配置", ShowAlert: true})
 		return nil
 	}
+	if option.Provider == ProviderSub2API && g.GetConfig().Sub2APIKey == "" {
+		_, _ = ctx.CallbackQuery.Answer(bot, &gotgbot.AnswerCallbackQueryOpts{Text: "Sub2API Key 未配置", ShowAlert: true})
+		return nil
+	}
 	requestCtx := context.Background()
 	if sessionID != 0 {
 		target, targetErr := g.AIQ.GetAISession(requestCtx, sessionID)
@@ -161,11 +173,11 @@ func ChangeModelByButton(bot *gotgbot.Bot, ctx *ext.Context) error {
 			}
 			return nil
 		}
-		_, currentModel, modelErr := g.GetAISessionModel(requestCtx, sessionID)
+		currentProvider, currentModel, modelErr := g.GetAISessionModel(requestCtx, sessionID)
 		if modelErr != nil {
 			return modelErr
 		}
-		if currentModel == model {
+		if currentProvider == provider && currentModel == model {
 			_, _ = ctx.CallbackQuery.Answer(bot, &gotgbot.AnswerCallbackQueryOpts{Text: "该会话已使用 " + option.Label})
 			return nil
 		}
@@ -175,7 +187,7 @@ func ChangeModelByButton(bot *gotgbot.Bot, ctx *ext.Context) error {
 		invalidateSession(sessionID)
 		text := fmt.Sprintf("历史会话 #%d 已切换到 %s；下次继续该会话时将从本地文本历史重建，不重放旧远端链。", sessionID, option.Label)
 		_, _, editErr := msg.EditText(bot, text,
-			&gotgbot.EditMessageTextOpts{ReplyMarkup: modelKeyboard(model, sessionID)})
+			&gotgbot.EditMessageTextOpts{ReplyMarkup: modelKeyboard(provider, model, sessionID)})
 		_, _ = ctx.CallbackQuery.Answer(bot, &gotgbot.AnswerCallbackQueryOpts{Text: "已切换到 " + option.Label})
 		return editErr
 	}
@@ -184,7 +196,7 @@ func ChangeModelByButton(bot *gotgbot.Bot, ctx *ext.Context) error {
 	}
 	invalidateChatSessions(msg.Chat.Id)
 	_, _, editErr := msg.EditText(bot, fmt.Sprintf("当前聊天已切换到 %s；下一条消息将开始新会话。", option.Label),
-		&gotgbot.EditMessageTextOpts{ReplyMarkup: modelKeyboard(model)})
+		&gotgbot.EditMessageTextOpts{ReplyMarkup: modelKeyboard(provider, model)})
 	_, _ = ctx.CallbackQuery.Answer(bot, &gotgbot.AnswerCallbackQueryOpts{Text: "已切换到 " + option.Label})
 	return editErr
 }

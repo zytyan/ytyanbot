@@ -49,11 +49,14 @@ type Config struct {
 	AIMediaPath         string    `koanf:"ai-media-path"`
 	GeminiKey           string    `koanf:"gemini-key"`
 	GeminiExplicitCache *bool     `koanf:"gemini-explicit-cache"`
+	Sub2APIKey          string    `koanf:"sub2api-key"`
+	Sub2APIBaseURL      string    `koanf:"sub2api-base-url"`
 	DeepSeekKey         string    `koanf:"deepseek-key"`
 	DeepSeekBaseURL     string    `koanf:"deepseek-base-url"`
 }
 
 const (
+	DefaultSub2APIBaseURL  = "http://127.0.0.1:18080/v1beta"
 	DefaultDeepSeekBaseURL = "https://api.deepseek.com"
 )
 
@@ -152,11 +155,20 @@ func normalizeConfig(cfg *Config) {
 	if value := os.Getenv("GEMINI_API_KEY"); value != "" {
 		cfg.GeminiKey = value
 	}
+	if value := os.Getenv("SUB2API_API_KEY"); value != "" {
+		cfg.Sub2APIKey = value
+	}
+	if value := os.Getenv("SUB2API_BASE_URL"); value != "" {
+		cfg.Sub2APIBaseURL = value
+	}
 	if value := os.Getenv("DEEPSEEK_API_KEY"); value != "" {
 		cfg.DeepSeekKey = value
 	}
 	if cfg.DeepSeekBaseURL == "" {
 		cfg.DeepSeekBaseURL = DefaultDeepSeekBaseURL
+	}
+	if cfg.Sub2APIBaseURL == "" {
+		cfg.Sub2APIBaseURL = DefaultSub2APIBaseURL
 	}
 	if cfg.AIMediaPath == "" {
 		if cfg.DatabasePath == "" || cfg.DatabasePath == ":memory:" {

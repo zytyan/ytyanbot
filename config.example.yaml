@@ -19,6 +19,8 @@ tg-api-url: http://localhost:8081
 drop-pending-updates: false
 gemini-key: ABCDEFGHIJKLMNOPQRST
 gemini-explicit-cache: true
+sub2api-key: ""
+sub2api-base-url: http://127.0.0.1:18080/v1beta
 deepseek-key: ""
 deepseek-base-url: https://api.deepseek.com
 

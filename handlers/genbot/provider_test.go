@@ -779,7 +779,7 @@ func TestGemini37FlashModelOptionsAreProviderSpecific(t *testing.T) {
 
 func TestGenerateSub2APIUsesNativeGeminiEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		require.Equal(t, "/v1beta/models/gemini-3.7-flash:generateContent", request.URL.Path)
+		require.Equal(t, "/antigravity/v1beta/models/gemini-3.7-flash:generateContent", request.URL.Path)
 		require.Equal(t, "test-key", request.Header.Get("x-goog-api-key"))
 		var payload struct {
 			Contents          []*genai.Content `json:"contents"`
@@ -794,7 +794,7 @@ func TestGenerateSub2APIUsesNativeGeminiEndpoint(t *testing.T) {
 	defer server.Close()
 
 	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{
-		APIKey: "test-key", Backend: genai.BackendGeminiAPI, BaseURL: server.URL + "/v1beta",
+		APIKey: "test-key", Backend: genai.BackendGeminiAPI, BaseURL: server.URL + "/antigravity/v1beta",
 	})
 	require.NoError(t, err)
 	session := &GeminiSession{

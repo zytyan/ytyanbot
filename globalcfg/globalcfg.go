@@ -56,7 +56,7 @@ type Config struct {
 }
 
 const (
-	DefaultSub2APIBaseURL  = "http://127.0.0.1:18080/v1beta"
+	DefaultSub2APIBaseURL  = "http://127.0.0.1:18080/antigravity/v1beta"
 	DefaultDeepSeekBaseURL = "https://api.deepseek.com"
 )
 

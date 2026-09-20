@@ -10,11 +10,11 @@ import (
 
 func TestNormalizeConfigSub2APIEnvironment(t *testing.T) {
 	t.Setenv("SUB2API_API_KEY", "env-sub2api-key")
-	t.Setenv("SUB2API_BASE_URL", "http://127.0.0.1:19090/v1beta")
-	cfg := Config{Sub2APIKey: "file-key", Sub2APIBaseURL: "http://file.invalid/v1beta"}
+	t.Setenv("SUB2API_BASE_URL", "http://127.0.0.1:19090/antigravity/v1beta")
+	cfg := Config{Sub2APIKey: "file-key", Sub2APIBaseURL: "http://file.invalid/antigravity/v1beta"}
 	normalizeConfig(&cfg)
 	assert.Equal(t, "env-sub2api-key", cfg.Sub2APIKey)
-	assert.Equal(t, "http://127.0.0.1:19090/v1beta", cfg.Sub2APIBaseURL)
+	assert.Equal(t, "http://127.0.0.1:19090/antigravity/v1beta", cfg.Sub2APIBaseURL)
 }
 
 func TestLoadConfig(t *testing.T) {

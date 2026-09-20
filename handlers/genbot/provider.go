@@ -15,13 +15,14 @@ import (
 )
 
 const (
-	ModelGemini37Flash   = "gemini-3.7-flash"
-	ModelGeminiFlash     = "gemini-3-flash-preview"
-	ModelGeminiFlashLite = "gemini-3.1-flash-lite"
-	ModelDeepSeekFlash   = "deepseek-v4-flash"
-	ModelDeepSeekVision  = "deepseek-v4-flash-vision-exp"
-	ModelDeepSeek41Flash = "deepseek-v4.1-flash-expires-on-0910"
-	defaultAIModel       = ModelGeminiFlash
+	ModelGemini37Flash        = "gemini-3.7-flash"
+	ModelSub2APIGemini37Flash = "gemini-3.7-flash-tiered"
+	ModelGeminiFlash          = "gemini-3-flash-preview"
+	ModelGeminiFlashLite      = "gemini-3.1-flash-lite"
+	ModelDeepSeekFlash        = "deepseek-v4-flash"
+	ModelDeepSeekVision       = "deepseek-v4-flash-vision-exp"
+	ModelDeepSeek41Flash      = "deepseek-v4.1-flash-expires-on-0910"
+	defaultAIModel            = ModelGeminiFlash
 )
 
 const (
@@ -101,6 +102,13 @@ func isNativeGeminiProvider(provider string) bool {
 	return provider == ProviderGemini || provider == ProviderSub2API
 }
 
+func sub2APIModel(model string) string {
+	if model == ModelGemini37Flash {
+		return ModelSub2APIGemini37Flash
+	}
+	return model
+}
+
 func configureGeminiThinking(model string, config *genai.GenerateContentConfig) {
 	if config.ThinkingConfig == nil {
 		config.ThinkingConfig = &genai.ThinkingConfig{}
@@ -154,7 +162,7 @@ func generateSub2APIWithClient(ctx context.Context, client *genai.Client, sessio
 	requestConfig := *config
 	requestConfig.SystemInstruction = genai.NewContentFromText(systemPrompt, genai.RoleModel)
 	contents := geminiContentsForWindow(session, window)
-	response, err := generateGeminiContentsWithClient(ctx, client, session.Model, contents, &requestConfig)
+	response, err := generateGeminiContentsWithClient(ctx, client, sub2APIModel(session.Model), contents, &requestConfig)
 	if err != nil {
 		return nil, err
 	}

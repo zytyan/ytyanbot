@@ -52,7 +52,10 @@ func SessionHelp(bot *gotgbot.Bot, ctx *ext.Context) error {
 	return err
 }
 
-func setReaction(bot *gotgbot.Bot, msg *gotgbot.Message, emoji string) {
+func setReaction(enabled bool, bot *gotgbot.Bot, msg *gotgbot.Message, emoji string) {
+	if !enabled {
+		return
+	}
 	_, err := msg.SetReaction(bot, &gotgbot.SetMessageReactionOpts{
 		Reaction: []gotgbot.ReactionType{gotgbot.ReactionTypeEmoji{Emoji: emoji}},
 	})

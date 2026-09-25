@@ -128,6 +128,12 @@ type AiSystemPrompt struct {
 	UpdatedAt int64  `json:"updated_at"`
 }
 
+type AiUserSetting struct {
+	UserID           int64 `json:"user_id"`
+	ReactionsEnabled int64 `json:"reactions_enabled"`
+	UpdatedAt        int64 `json:"updated_at"`
+}
+
 type MediaObject struct {
 	Sha256       string `json:"sha256"`
 	RelativePath string `json:"relative_path"`

@@ -227,6 +227,52 @@ func ToggleShowUsage(bot *gotgbot.Bot, ctx *ext.Context) error {
 	return err
 }
 
+func configureAIReactions(ctx context.Context, userID int64, args []string) (string, error) {
+	requestedState := false
+	hasRequestedState := false
+	if len(args) == 2 {
+		switch strings.ToLower(args[1]) {
+		case "on":
+			requestedState = true
+			hasRequestedState = true
+		case "off":
+			hasRequestedState = true
+		}
+	}
+	if hasRequestedState {
+		if err := g.SetAIUserReactionsEnabled(ctx, userID, requestedState); err != nil {
+			return "", err
+		}
+		state := "关闭"
+		if requestedState {
+			state = "开启"
+		}
+		return "已" + state + " AI emoji reaction。", nil
+	}
+
+	enabled, err := g.GetAIUserReactionsEnabled(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	state := "关闭"
+	if enabled {
+		state = "开启"
+	}
+	return "AI emoji reaction 当前为" + state + "。\n用法：/ai_reaction on|off", nil
+}
+
+func SetAIReactions(bot *gotgbot.Bot, ctx *ext.Context) error {
+	if ctx.EffectiveMessage == nil || ctx.EffectiveUser == nil {
+		return errors.New("缺少聊天或用户信息")
+	}
+	text, err := configureAIReactions(context.Background(), ctx.EffectiveUser.Id, ctx.Args())
+	if err != nil {
+		return err
+	}
+	_, err = ctx.EffectiveMessage.Reply(bot, text, nil)
+	return err
+}
+
 func usageKeyboard() gotgbot.InlineKeyboardMarkup {
 	return gotgbot.InlineKeyboardMarkup{InlineKeyboard: [][]gotgbot.InlineKeyboardButton{{{
 		Text: "📊 Token 用量", CallbackData: usageCallbackData,

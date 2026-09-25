@@ -64,7 +64,7 @@ YTYAN_CONFIG_FILE=/path/to/config.yaml go run .
 - `deepseek-base-url`：DeepSeek API 地址，默认 `https://api.deepseek.com`。
 - `drop-pending-updates`：启动时是否丢弃 Telegram 未处理更新。
 
-AI 聊天可使用 `/change_model`（或 `/model`）切换当前聊天模型，使用 `/show_usage` 开关每条 AI 回复下方的 Token 用量按钮。群聊中这些配置仅允许群主、管理员或 `god` 修改。
+AI 聊天可使用 `/change_model`（或 `/model`）切换当前聊天模型，使用 `/show_usage` 开关每条 AI 回复下方的 Token 用量按钮。群聊中这些配置仅允许群主、管理员或 `god` 修改。每位用户还可使用 `/ai_reaction on|off` 全局开启或关闭 bot 处理其 AI 请求时发送的 emoji reaction；默认开启。
 
 注意：`config.example.yaml` 中的 token 和 key 仅用于示例/测试占位，实际部署时请使用自己的密钥，并避免提交真实配置。
 

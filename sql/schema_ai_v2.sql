@@ -15,6 +15,13 @@ CREATE TABLE ai_chat_settings
     updated_at       INTEGER NOT NULL
 ) WITHOUT ROWID, STRICT;
 
+CREATE TABLE ai_user_settings
+(
+    user_id           INTEGER PRIMARY KEY,
+    reactions_enabled INTEGER NOT NULL DEFAULT 1 CHECK (reactions_enabled IN (0, 1)),
+    updated_at        INTEGER NOT NULL
+) WITHOUT ROWID, STRICT;
+
 CREATE TABLE ai_sessions
 (
     id                        INTEGER PRIMARY KEY AUTOINCREMENT,

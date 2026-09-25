@@ -159,6 +159,15 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 	msg := ctx.EffectiveMessage
 	genCtx, cancel := context.WithTimeout(context.Background(), time.Minute*15)
 	defer cancel()
+	reactionsEnabled := true
+	if ctx.EffectiveUser != nil {
+		var reactionErr error
+		reactionsEnabled, reactionErr = g.GetAIUserReactionsEnabled(genCtx, ctx.EffectiveUser.Id)
+		if reactionErr != nil {
+			log.Warn("get AI reaction preference", "user_id", ctx.EffectiveUser.Id, "err", reactionErr)
+			reactionsEnabled = false
+		}
+	}
 	if msg.MediaGroupId != "" {
 		key := aiMediaGroupKey{chatID: msg.Chat.Id, mediaGroupID: msg.MediaGroupId}
 		if !claimAIMediaGroup(key) {
@@ -172,10 +181,10 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 			if errors.Is(err, sql.ErrNoRows) {
 				err = ErrAIMediaGroupUnavailable
 			}
-			return replyAIMediaGroupError(bot, msg, err)
+			return replyAIMediaGroupError(reactionsEnabled, bot, msg, err)
 		}
 		if err = validateAIMediaGroup(group, time.Now()); err != nil {
-			return replyAIMediaGroupError(bot, msg, err)
+			return replyAIMediaGroupError(reactionsEnabled, bot, msg, err)
 		}
 	}
 	text := msg.GetText()
@@ -190,7 +199,7 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 	if err != nil {
 		return fmt.Errorf("get system prompt: %w", err)
 	}
-	setReaction(bot, msg, "👀")
+	setReaction(reactionsEnabled, bot, msg, "👀")
 
 	sysPromptCtx := ReplaceCtx{
 		Bot:    bot,
@@ -208,7 +217,7 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 	if err := session.AddTgMessageWithReplyMode(genCtx, bot, ctx.EffectiveMessage, createNewSession); err != nil {
 		if errors.Is(err, ErrAIMediaGroupUnavailable) || errors.Is(err, ErrAIMediaGroupMixed) ||
 			errors.Is(err, ErrAIMediaGroupDownload) {
-			return replyAIMediaGroupError(bot, msg, err)
+			return replyAIMediaGroupError(reactionsEnabled, bot, msg, err)
 		}
 		return err
 	}
@@ -250,11 +259,11 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 	if err != nil {
 		_ = MarkAIRunFailed(genCtx, run.ID, failureStatus, normalizeAIRunErrorCode(err), err)
 		if errors.Is(err, ErrDeepSeekVideoOnly) {
-			setReaction(bot, msg, "🤔")
+			setReaction(reactionsEnabled, bot, msg, "🤔")
 			_, replyErr := ctx.EffectiveMessage.Reply(bot, err.Error(), nil)
 			return replyErr
 		}
-		setReaction(bot, msg, "😭")
+		setReaction(reactionsEnabled, bot, msg, "😭")
 		_, _ = ctx.EffectiveMessage.Reply(bot, fmt.Sprintf("error:%s", err), nil)
 		return err
 	}
@@ -270,7 +279,7 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 		if res.Feedback != "" {
 			aiText += "，原因: " + res.Feedback
 		}
-		setReaction(bot, msg, "🤯")
+		setReaction(reactionsEnabled, bot, msg, "🤯")
 	}
 	var replyMarkup gotgbot.ReplyMarkup
 	showUsage, usageErr := g.GetAIChatUsageEnabled(genCtx, msg.Chat.Id)
@@ -294,8 +303,8 @@ func GeminiReply(bot *gotgbot.Bot, ctx *ext.Context) error {
 	return nil
 }
 
-func replyAIMediaGroupError(bot *gotgbot.Bot, msg *gotgbot.Message, err error) error {
-	setReaction(bot, msg, "🤔")
+func replyAIMediaGroupError(reactionsEnabled bool, bot *gotgbot.Bot, msg *gotgbot.Message, err error) error {
+	setReaction(reactionsEnabled, bot, msg, "🤔")
 	_, replyErr := msg.Reply(bot, err.Error(), nil)
 	return replyErr
 }

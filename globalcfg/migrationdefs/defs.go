@@ -89,6 +89,12 @@ ai media group retention v10
 - index seven-day expiry cleanup and cascade group deletion to cached photo metadata
 `
 
+const AIUserReactionSettingsV11Source = `
+ai user reaction settings v11
+- store each Telegram user's global AI reaction preference outside the users name dimension
+- default users without a saved preference to enabled
+`
+
 var AIV2OfflineSource = aiV2OfflineDescription + "\n" + legacyschema.V2V3
 
 var All = []Definition{
@@ -102,6 +108,7 @@ var All = []Definition{
 	{Version: 8, Name: "bili_inline_retention", Source: BiliInlineRetentionV8Source},
 	{Version: 9, Name: "picture_rating_constraints", Source: PictureRatingConstraintsV9Source, Offline: true},
 	{Version: 10, Name: "ai_media_group_retention", Source: AIMediaGroupRetentionV10Source},
+	{Version: 11, Name: "ai_user_reaction_settings", Source: AIUserReactionSettingsV11Source},
 }
 
 func Checksum(source string) string {

@@ -262,6 +262,7 @@ func main() {
 	dp.Command("change_model", genbot.ChangeGeminiModel)
 	dp.Command("model", genbot.ChangeGeminiModel)
 	dp.Command("show_usage", genbot.ToggleShowUsage)
+	dp.Command("ai_reaction", genbot.SetAIReactions)
 	dp.NewMessage(hdrs.BiliMsgFilter, hdrs.BiliMsgConverter)
 	dp.NewMessage(hdrs.DetectNsfwPhoto, hdrs.NsfwDetect)
 	dp.NewMessage(hdrs.NeedSolve, hdrs.SolveMath)

@@ -84,6 +84,23 @@ func ToggleAIChatUsage(ctx context.Context, chatID int64, fallbackProvider, fall
 	return settings.ShowUsage != 0, nil
 }
 
+func GetAIUserReactionsEnabled(ctx context.Context, userID int64) (bool, error) {
+	settings, err := AIQ.GetAIUserSettings(ctx, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	return settings.ReactionsEnabled != 0, err
+}
+
+func SetAIUserReactionsEnabled(ctx context.Context, userID int64, enabled bool) error {
+	value := int64(0)
+	if enabled {
+		value = 1
+	}
+	_, err := AIQ.SetAIUserReactions(ctx, userID, value, time.Now().Unix())
+	return err
+}
+
 func GetAISessionModel(ctx context.Context, sessionID int64) (provider, model string, err error) {
 	session, err := AIQ.GetAISession(ctx, sessionID)
 	if err != nil {

@@ -84,6 +84,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getAISystemPromptStmt, err = db.PrepareContext(ctx, getAISystemPrompt); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAISystemPrompt: %w", err)
 	}
+	if q.getAIUserSettingsStmt, err = db.PrepareContext(ctx, getAIUserSettings); err != nil {
+		return nil, fmt.Errorf("error preparing query GetAIUserSettings: %w", err)
+	}
 	if q.getMediaObjectStmt, err = db.PrepareContext(ctx, getMediaObject); err != nil {
 		return nil, fmt.Errorf("error preparing query GetMediaObject: %w", err)
 	}
@@ -134,6 +137,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.setAISessionModelStmt, err = db.PrepareContext(ctx, setAISessionModel); err != nil {
 		return nil, fmt.Errorf("error preparing query SetAISessionModel: %w", err)
+	}
+	if q.setAIUserReactionsStmt, err = db.PrepareContext(ctx, setAIUserReactions); err != nil {
+		return nil, fmt.Errorf("error preparing query SetAIUserReactions: %w", err)
 	}
 	if q.toggleAIChatSettingsUsageStmt, err = db.PrepareContext(ctx, toggleAIChatSettingsUsage); err != nil {
 		return nil, fmt.Errorf("error preparing query ToggleAIChatSettingsUsage: %w", err)
@@ -261,6 +267,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getAISystemPromptStmt: %w", cerr)
 		}
 	}
+	if q.getAIUserSettingsStmt != nil {
+		if cerr := q.getAIUserSettingsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getAIUserSettingsStmt: %w", cerr)
+		}
+	}
 	if q.getMediaObjectStmt != nil {
 		if cerr := q.getMediaObjectStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getMediaObjectStmt: %w", cerr)
@@ -344,6 +355,11 @@ func (q *Queries) Close() error {
 	if q.setAISessionModelStmt != nil {
 		if cerr := q.setAISessionModelStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing setAISessionModelStmt: %w", cerr)
+		}
+	}
+	if q.setAIUserReactionsStmt != nil {
+		if cerr := q.setAIUserReactionsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing setAIUserReactionsStmt: %w", cerr)
 		}
 	}
 	if q.toggleAIChatSettingsUsageStmt != nil {
@@ -440,6 +456,7 @@ type Queries struct {
 	getAISessionIDByMessageStmt           *sql.Stmt
 	getAISessionProviderStateStmt         *sql.Stmt
 	getAISystemPromptStmt                 *sql.Stmt
+	getAIUserSettingsStmt                 *sql.Stmt
 	getMediaObjectStmt                    *sql.Stmt
 	getNextAISessionMessagePositionStmt   *sql.Stmt
 	incrementAISessionUsageStmt           *sql.Stmt
@@ -457,6 +474,7 @@ type Queries struct {
 	recordSchemaMigrationStmt             *sql.Stmt
 	setAIChatModelSettingStmt             *sql.Stmt
 	setAISessionModelStmt                 *sql.Stmt
+	setAIUserReactionsStmt                *sql.Stmt
 	toggleAIChatSettingsUsageStmt         *sql.Stmt
 	touchAISessionStmt                    *sql.Stmt
 	upsertAIChatSettingsStmt              *sql.Stmt
@@ -490,6 +508,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getAISessionIDByMessageStmt:           q.getAISessionIDByMessageStmt,
 		getAISessionProviderStateStmt:         q.getAISessionProviderStateStmt,
 		getAISystemPromptStmt:                 q.getAISystemPromptStmt,
+		getAIUserSettingsStmt:                 q.getAIUserSettingsStmt,
 		getMediaObjectStmt:                    q.getMediaObjectStmt,
 		getNextAISessionMessagePositionStmt:   q.getNextAISessionMessagePositionStmt,
 		incrementAISessionUsageStmt:           q.incrementAISessionUsageStmt,
@@ -507,6 +526,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		recordSchemaMigrationStmt:             q.recordSchemaMigrationStmt,
 		setAIChatModelSettingStmt:             q.setAIChatModelSettingStmt,
 		setAISessionModelStmt:                 q.setAISessionModelStmt,
+		setAIUserReactionsStmt:                q.setAIUserReactionsStmt,
 		toggleAIChatSettingsUsageStmt:         q.toggleAIChatSettingsUsageStmt,
 		touchAISessionStmt:                    q.touchAISessionStmt,
 		upsertAIChatSettingsStmt:              q.upsertAIChatSettingsStmt,

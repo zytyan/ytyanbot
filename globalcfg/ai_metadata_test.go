@@ -30,6 +30,25 @@ func TestAISettingsUseV2QueriesAndPersistProvider(t *testing.T) {
 	require.True(t, enabled)
 }
 
+func TestAIUserReactionSettingsDefaultAndPersist(t *testing.T) {
+	ctx := context.Background()
+	const userID int64 = 930003
+
+	enabled, err := GetAIUserReactionsEnabled(ctx, userID)
+	require.NoError(t, err)
+	require.True(t, enabled)
+
+	require.NoError(t, SetAIUserReactionsEnabled(ctx, userID, false))
+	enabled, err = GetAIUserReactionsEnabled(ctx, userID)
+	require.NoError(t, err)
+	require.False(t, enabled)
+
+	require.NoError(t, SetAIUserReactionsEnabled(ctx, userID, true))
+	enabled, err = GetAIUserReactionsEnabled(ctx, userID)
+	require.NoError(t, err)
+	require.True(t, enabled)
+}
+
 func TestAISessionProviderStateIsVersionedJSONAndClearedOnModelChange(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().Unix()

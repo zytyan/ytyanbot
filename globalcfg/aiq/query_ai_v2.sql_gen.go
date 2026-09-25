@@ -553,6 +553,17 @@ func (q *Queries) GetAISystemPrompt(ctx context.Context, chatID int64, topicID i
 	return prompt, err
 }
 
+const getAIUserSettings = `-- name: GetAIUserSettings :one
+SELECT user_id, reactions_enabled, updated_at FROM ai_user_settings WHERE user_id = ?
+`
+
+func (q *Queries) GetAIUserSettings(ctx context.Context, userID int64) (AiUserSetting, error) {
+	row := q.queryRow(ctx, q.getAIUserSettingsStmt, getAIUserSettings, userID)
+	var i AiUserSetting
+	err := row.Scan(&i.UserID, &i.ReactionsEnabled, &i.UpdatedAt)
+	return i, err
+}
+
 const getMediaObject = `-- name: GetMediaObject :one
 SELECT sha256, relative_path, byte_size, mime_type, created_at FROM media_objects WHERE sha256=?
 `
@@ -1072,6 +1083,22 @@ func (q *Queries) SetAISessionModel(ctx context.Context, provider string, model 
 		sessionID,
 	)
 	return err
+}
+
+const setAIUserReactions = `-- name: SetAIUserReactions :one
+INSERT INTO ai_user_settings(user_id, reactions_enabled, updated_at)
+VALUES (?1, ?2, ?3)
+ON CONFLICT(user_id) DO UPDATE SET
+    reactions_enabled=excluded.reactions_enabled,
+    updated_at=excluded.updated_at
+RETURNING user_id, reactions_enabled, updated_at
+`
+
+func (q *Queries) SetAIUserReactions(ctx context.Context, userID int64, reactionsEnabled int64, updatedAt int64) (AiUserSetting, error) {
+	row := q.queryRow(ctx, q.setAIUserReactionsStmt, setAIUserReactions, userID, reactionsEnabled, updatedAt)
+	var i AiUserSetting
+	err := row.Scan(&i.UserID, &i.ReactionsEnabled, &i.UpdatedAt)
+	return i, err
 }
 
 const toggleAIChatSettingsUsage = `-- name: ToggleAIChatSettingsUsage :one

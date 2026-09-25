@@ -175,6 +175,20 @@ CREATE INDEX idx_ai_media_group_photos_group ON ai_media_group_photos(chat_id, m
 			return err
 		},
 	},
+	{
+		Version: 11,
+		Name:    "ai_user_reaction_settings",
+		Source:  migrationdefs.AIUserReactionSettingsV11Source,
+		Run: func(ctx context.Context, tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, `
+CREATE TABLE ai_user_settings(
+    user_id INTEGER PRIMARY KEY,
+    reactions_enabled INTEGER NOT NULL DEFAULT 1 CHECK(reactions_enabled IN (0, 1)),
+    updated_at INTEGER NOT NULL
+) WITHOUT ROWID, STRICT;`)
+			return err
+		},
+	},
 }
 
 func All() []Migration {

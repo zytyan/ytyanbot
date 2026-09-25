@@ -11,6 +11,17 @@ RETURNING *;
 -- name: GetAIChatSettings :one
 SELECT * FROM ai_chat_settings WHERE chat_id = ?;
 
+-- name: GetAIUserSettings :one
+SELECT * FROM ai_user_settings WHERE user_id = ?;
+
+-- name: SetAIUserReactions :one
+INSERT INTO ai_user_settings(user_id, reactions_enabled, updated_at)
+VALUES (sqlc.arg(user_id), sqlc.arg(reactions_enabled), sqlc.arg(updated_at))
+ON CONFLICT(user_id) DO UPDATE SET
+    reactions_enabled=excluded.reactions_enabled,
+    updated_at=excluded.updated_at
+RETURNING *;
+
 -- name: SetAIChatModelSetting :one
 INSERT INTO ai_chat_settings(chat_id, default_provider, default_model, show_usage, updated_at)
 VALUES (sqlc.arg(chat_id), sqlc.arg(default_provider), sqlc.arg(default_model), 0, sqlc.arg(updated_at))

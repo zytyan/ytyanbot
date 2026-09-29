@@ -5,14 +5,75 @@ import (
 	"main/globalcfg/h"
 	"main/helpers/mathparser"
 	"math/big"
+	"strconv"
 	"strings"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
 )
 
+var smallNumberThreshold = big.NewRat(1, 20000)
+
 func ratToText(r *big.Rat) string {
-	return strings.TrimRight(strings.TrimRight(r.FloatString(4), "0"), ".")
+	fixed := strings.TrimRight(strings.TrimRight(r.FloatString(4), "0"), ".")
+	if r.Sign() == 0 {
+		return fixed
+	}
+
+	abs := new(big.Rat).Abs(r)
+	if abs.Cmp(smallNumberThreshold) >= 0 {
+		return fixed
+	}
+
+	return ratToScientificText(r, 4)
+}
+
+func ratToScientificText(r *big.Rat, significantDigits int) string {
+	abs := new(big.Rat).Abs(r)
+	exponent := len(abs.Num().String()) - len(abs.Denom().String())
+
+	var power, scaled big.Int
+	power.Exp(big.NewInt(10), big.NewInt(int64(absInt(exponent))), nil)
+	if exponent >= 0 {
+		scaled.Mul(abs.Denom(), &power)
+		if abs.Num().Cmp(&scaled) < 0 {
+			exponent--
+		}
+	} else {
+		scaled.Mul(abs.Num(), &power)
+		if scaled.Cmp(abs.Denom()) < 0 {
+			exponent--
+		}
+	}
+
+	power.Exp(big.NewInt(10), big.NewInt(int64(absInt(exponent))), nil)
+	scale := new(big.Rat).SetInt(&power)
+	mantissa := new(big.Rat).Set(abs)
+	if exponent < 0 {
+		mantissa.Mul(mantissa, scale)
+	} else {
+		mantissa.Quo(mantissa, scale)
+	}
+
+	digitsAfterDecimal := significantDigits - 1
+	mantissaText := mantissa.FloatString(digitsAfterDecimal)
+	if strings.HasPrefix(mantissaText, "10.") || mantissaText == "10" {
+		exponent++
+		mantissaText = new(big.Rat).SetFrac64(1, 1).FloatString(digitsAfterDecimal)
+	}
+	mantissaText = strings.TrimRight(strings.TrimRight(mantissaText, "0"), ".")
+	if r.Sign() < 0 {
+		mantissaText = "-" + mantissaText
+	}
+
+	return mantissaText + "e" + strconv.Itoa(exponent)
+}
+
+func absInt(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func SolveMath(bot *gotgbot.Bot, ctx *ext.Context) (err error) {

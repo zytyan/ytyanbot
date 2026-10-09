@@ -59,7 +59,7 @@ YTYAN_CONFIG_FILE=/path/to/config.yaml go run .
 - `database-path`：主 SQLite 数据库路径。
 - `ai-media-path`：AI 多媒体内容寻址目录；默认位于主数据库旁的 `ai-media/`。
 - `ocr`：Azure OCR 服务配置。
-- `content-moderator.account-id` / `content-moderator.api-token`：Cloudflare 账户及 Workers AI API Token；图片审核固定使用 `@cf/cloudflare/clef-flash`，按微软图片 Sexual 分级描述返回 0/2/4/6。图片最长边压缩至 768 像素，仅提交一个分级问题；审核失败不会保存评分。
+- `content-moderator.account-id` / `content-moderator.api-token`：Cloudflare 账户及 Workers AI API Token；图片审核固定使用 `@cf/cloudflare/clef-flash`，按微软图片 Sexual 分级描述返回 0/2/4/6。图片最长边压缩至 768 像素，同时判断二次元插画；NSFW 图片和非 NSFW 的二次元插画都会收录，后者评分为 0。`/score` 显示是否已入库；审核失败不会保存评分。
 - `gemini-key`：Gemini API Key。
 - `deepseek-key`：DeepSeek API Key；也可通过 `DEEPSEEK_API_KEY` 环境变量提供。
 - `deepseek-base-url`：DeepSeek API 地址，默认 `https://api.deepseek.com`。

@@ -21,19 +21,23 @@ func waitGroupedDetectorCleanup(t *testing.T, key groupedMsgK) {
 	t.Fatalf("group detector %+v was not cleaned up", key)
 }
 
-func TestProcessGroupedNsfwChecksFirstMessageAndStopsAfterReply(t *testing.T) {
+func TestProcessGroupedNsfwChecksEveryMessageButRepliesOnce(t *testing.T) {
 	key := groupedMsgK{ChatId: -940001, GroupId: "first-message"}
 	first := &gotgbot.Message{MessageId: 1}
 	second := &gotgbot.Message{MessageId: 2}
 	var detected []int64
-	detect := func(msg *gotgbot.Message) bool {
+	var replies int
+	detect := func(msg *gotgbot.Message, allowReply bool) bool {
 		detected = append(detected, msg.MessageId)
-		return true
+		if allowReply {
+			replies++
+		}
+		return allowReply
 	}
 	processGroupedNsfw(key, first, 10*time.Millisecond, detect)
 	processGroupedNsfw(key, second, 10*time.Millisecond, detect)
-	if len(detected) != 1 || detected[0] != first.MessageId {
-		t.Fatalf("detected messages = %v, want first message only", detected)
+	if len(detected) != 2 || detected[0] != first.MessageId || detected[1] != second.MessageId || replies != 1 {
+		t.Fatalf("detected messages = %v, replies = %d; want both messages and one reply", detected, replies)
 	}
 	waitGroupedDetectorCleanup(t, key)
 }
@@ -48,7 +52,7 @@ func TestProcessGroupedNsfwSerializesConcurrentMessages(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			processGroupedNsfw(key, &gotgbot.Message{MessageId: int64(id)}, 20*time.Millisecond,
-				func(*gotgbot.Message) bool {
+				func(*gotgbot.Message, bool) bool {
 					detected.Add(1)
 					return false
 				})

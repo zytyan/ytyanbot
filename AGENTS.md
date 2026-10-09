@@ -56,5 +56,6 @@ These instructions apply to the whole repository.
 
 - Image moderation uses Cloudflare Workers AI `@cf/cloudflare/clef-flash` through direct HTTP calls. Configure `content-moderator.account-id` and `content-moderator.api-token` in runtime YAML; never commit credentials. Azure remains only for OCR.
 - Keep the Microsoft Sexual IMAGE severity criteria in `helpers/cloudflare/moderator.go` and return only 0/2/4/6 from a choice question. Preserve existing Telegram replies, statistics, user ratings, and historical image scores; failed or malformed responses must never be saved as score 0.
-- Normalize image inputs to JPEG with a maximum 768-pixel edge and 128 KiB payload before inference. Send only the severity question, with bounded request timeouts and no Azure fallback.
+- Normalize image inputs to JPEG with a maximum 768-pixel edge and 128 KiB payload before inference. Send severity and anime/manga-style illustration choice questions, with bounded request timeouts and no Azure fallback.
+- Collect NSFW images and safe anime/manga illustrations (score 0). Classify every image in an album while replying at most once; `/score` must finish collection before displaying actual database membership, and offer voting buttons only for stored images. Preserve user votes during upserts.
 - Verify provider request/response handling with local HTTP tests, run `go test ./...`, and build with production `-tags=jsoniter` before deployment.

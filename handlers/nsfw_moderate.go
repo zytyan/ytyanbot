@@ -2,9 +2,12 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	g "main/globalcfg"
 	"main/globalcfg/h"
+	"main/globalcfg/q"
 	"main/helpers/cloudflare"
 	"regexp"
 	"strings"
@@ -64,13 +67,18 @@ func HasImage(msg *gotgbot.Message) bool {
 	return true
 }
 
-// saveNsfw
-// param score: [0, 2, 4, 6]
-func saveNsfw(fileUid, fileId string, severity int) {
-	err := g.Q.AddPic(context.Background(), fileUid, fileId, severity)
-	if err != nil {
-		log.Warn("save nsfw failed", "file_id", fileId, "err", err)
+// Store NSFW pictures and safe anime illustrations, then report actual membership.
+func collectModeratedPic(ctx context.Context, queries *q.Queries, photo *gotgbot.PhotoSize, result *cloudflare.Result) (q.SavedPic, bool, error) {
+	if result.Severity >= 2 || result.AnimeIllustration {
+		if err := queries.AddPic(ctx, photo.FileUniqueId, photo.FileId, result.Severity); err != nil {
+			return q.SavedPic{}, false, err
+		}
 	}
+	pic, err := queries.GetNsfwPicByFileUid(ctx, photo.FileUniqueId)
+	if errors.Is(err, sql.ErrNoRows) {
+		return q.SavedPic{}, false, nil
+	}
+	return pic, err == nil, err
 }
 
 var nsfwReplyMsgList = [2][3]string{
@@ -86,8 +94,6 @@ func replyNsfw(bot *gotgbot.Bot, msg *gotgbot.Message, result *cloudflare.Result
 		return false, fmt.Errorf("severity %d is invalid", severity)
 	}
 	photo := msg.Photo[len(msg.Photo)-1]
-
-	go saveNsfw(photo.FileUniqueId, photo.FileId, severity)
 	if severity >= 6 {
 		g.Q.ChatStatNow(msg.Chat.Id).IncAdultCount()
 	} else {
@@ -107,10 +113,21 @@ func replyNsfw(bot *gotgbot.Bot, msg *gotgbot.Message, result *cloudflare.Result
 }
 
 func moderateDetectOne(bot *gotgbot.Bot, msg *gotgbot.Message) (replied bool) {
+	return moderateDetectPhoto(bot, msg, true)
+}
+
+func moderateDetectPhoto(bot *gotgbot.Bot, msg *gotgbot.Message, allowReply bool) (replied bool) {
 	moderatorResult, err := moderatorMsg(bot, &msg.Photo[len(msg.Photo)-1])
 	if err != nil {
 		log.Warn("moderate msg failed", "err", err)
 		return
+	}
+	if _, _, err := collectModeratedPic(context.Background(), g.Q, &msg.Photo[len(msg.Photo)-1], moderatorResult); err != nil {
+		log.Warn("collect moderated image failed", "err", err)
+		return
+	}
+	if !allowReply {
+		return false
 	}
 	replied, err = replyNsfw(bot, msg, moderatorResult)
 	if err != nil {
@@ -147,7 +164,7 @@ func expireGroupedDetector(key groupedMsgK, detector *groupedDetector, idleTimeo
 }
 
 func processGroupedNsfw(key groupedMsgK, msg *gotgbot.Message, idleTimeout time.Duration,
-	detect func(*gotgbot.Message) bool,
+	detect func(*gotgbot.Message, bool) bool,
 ) {
 	for {
 		candidate := &groupedDetector{lastSeen: time.Now()}
@@ -163,8 +180,8 @@ func processGroupedNsfw(key groupedMsgK, msg *gotgbot.Message, idleTimeout time.
 			continue
 		}
 		detector.lastSeen = time.Now()
-		if !detector.replied {
-			detector.replied = detect(msg)
+		if detect(msg, !detector.replied) {
+			detector.replied = true
 		}
 		detector.lastSeen = time.Now()
 		detector.mu.Unlock()
@@ -174,8 +191,8 @@ func processGroupedNsfw(key groupedMsgK, msg *gotgbot.Message, idleTimeout time.
 
 func moderateDetectGrouped(bot *gotgbot.Bot, msg *gotgbot.Message) {
 	key := groupedMsgK{ChatId: msg.Chat.Id, GroupId: msg.MediaGroupId}
-	processGroupedNsfw(key, msg, 10*time.Second, func(groupedMessage *gotgbot.Message) bool {
-		return moderateDetectOne(bot, groupedMessage)
+	processGroupedNsfw(key, msg, 10*time.Second, func(groupedMessage *gotgbot.Message, allowReply bool) bool {
+		return moderateDetectPhoto(bot, groupedMessage, allowReply)
 	})
 }
 
@@ -213,14 +230,23 @@ func CmdScore(bot *gotgbot.Bot, ctx *ext.Context) (err error) {
 		return err
 	}
 	severity := result.Severity
-	go saveNsfw(photo.FileUniqueId, photo.FileId, severity)
-	savedPic, err := g.Q.GetNsfwPicByFileUid(context.Background(), photo.FileUniqueId)
+	savedPic, collected, err := collectModeratedPic(context.Background(), g.Q, photo, result)
+	if err != nil {
+		log.Warn("collect scored image failed", "err", err)
+		_, err = msg.Reply(bot, "图库读写失败", nil)
+		return err
+	}
 	userRate := severity
-	if err == nil {
+	if collected {
 		userRate = int(savedPic.UserRate)
 	}
-	replyMarkup := BuildNsfwRateButton(photo.FileUniqueId, nsfwCallbackButtonCmdScore)
-	text := fmt.Sprintf("bot评分: %d/6\n用户评分: %d/6", severity, userRate)
+	var replyMarkup *gotgbot.InlineKeyboardMarkup
+	collectionText := "否"
+	if collected {
+		collectionText = "是"
+		replyMarkup = BuildNsfwRateButton(photo.FileUniqueId, nsfwCallbackButtonCmdScore)
+	}
+	text := fmt.Sprintf("bot评分: %d/6\n已入库: %s\n用户评分: %d/6", severity, collectionText, userRate)
 	_, err = msg.Reply(bot, text, &gotgbot.SendMessageOpts{
 		ReplyMarkup: replyMarkup,
 	})

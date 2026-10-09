@@ -41,7 +41,8 @@ type Moderator struct {
 }
 
 type Result struct {
-	Severity int
+	Severity          int
+	AnimeIllustration bool
 }
 
 func NewModerator(cfg Config) *Moderator {
@@ -96,6 +97,13 @@ func (m *Moderator) EvalDataContext(ctx context.Context, data []byte) (*Result, 
 			"type":         "choice",
 			"instructions": "Assess the single attached image using the Azure AI Content Safety Sexual IMAGE severity definitions below. Select exactly one severity: 0 Safe, 2 Low, 4 Medium, or 6 High. Apply the image definitions rather than text definitions. Decide from visible evidence and context, not the image source or filename.",
 			"criteria":     sexualSeverity,
+		}, "anime_illustration": map[string]any{
+			"type":         "choice",
+			"instructions": "Is this image a Japanese anime/manga-style (2D or '二次元') illustration? Classify the visual style independently of sexual content. Ordinary photos, screenshots of text or interfaces, and other illustration styles do not qualify.",
+			"criteria": map[string]string{
+				"yes": "A drawn or digitally illustrated image in Japanese anime or manga style, whether safe or sexual.",
+				"no":  "Not an anime/manga-style illustration, or insufficient visual evidence to identify that style.",
+			},
 		}},
 	})
 	if err != nil {
@@ -151,5 +159,9 @@ func (m *Moderator) EvalDataContext(ctx context.Context, data []byte) (*Result, 
 	default:
 		return nil, errors.New("Cloudflare moderation returned an invalid severity")
 	}
-	return &Result{Severity: severity}, nil
+	anime := envelope.Result.Answers["anime_illustration"]
+	if anime.Type != "choice" || (anime.Choice != "yes" && anime.Choice != "no") {
+		return nil, errors.New("Cloudflare moderation response missing or invalid anime illustration choice")
+	}
+	return &Result{Severity: severity, AnimeIllustration: anime.Choice == "yes"}, nil
 }

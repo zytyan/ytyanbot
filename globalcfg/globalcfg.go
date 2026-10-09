@@ -9,6 +9,7 @@ import (
 	"main/globalcfg/aiq"
 	"main/globalcfg/q"
 	"main/helpers/azure"
+	"main/helpers/cloudflare"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -36,23 +37,23 @@ type OcrConfig struct {
 }
 
 type Config struct {
-	BotToken            string    `koanf:"bot-token"`
-	God                 int64     `koanf:"god"`
-	MyChats             []int64   `koanf:"my-chats"`
-	AIChats             []int64   `koanf:"ai-chats"`
-	ContentModerator    Azure     `koanf:"content-moderator"`
-	Ocr                 OcrConfig `koanf:"ocr"`
-	TgApiUrl            string    `koanf:"tg-api-url"`
-	DropPendingUpdates  bool      `koanf:"drop-pending-updates"`
-	LogLevel            int8      `koanf:"log-level"`
-	DatabasePath        string    `koanf:"database-path"`
-	AIMediaPath         string    `koanf:"ai-media-path"`
-	GeminiKey           string    `koanf:"gemini-key"`
-	GeminiExplicitCache *bool     `koanf:"gemini-explicit-cache"`
-	Sub2APIKey          string    `koanf:"sub2api-key"`
-	Sub2APIBaseURL      string    `koanf:"sub2api-base-url"`
-	DeepSeekKey         string    `koanf:"deepseek-key"`
-	DeepSeekBaseURL     string    `koanf:"deepseek-base-url"`
+	BotToken            string            `koanf:"bot-token"`
+	God                 int64             `koanf:"god"`
+	MyChats             []int64           `koanf:"my-chats"`
+	AIChats             []int64           `koanf:"ai-chats"`
+	ContentModerator    cloudflare.Config `koanf:"content-moderator"`
+	Ocr                 OcrConfig         `koanf:"ocr"`
+	TgApiUrl            string            `koanf:"tg-api-url"`
+	DropPendingUpdates  bool              `koanf:"drop-pending-updates"`
+	LogLevel            int8              `koanf:"log-level"`
+	DatabasePath        string            `koanf:"database-path"`
+	AIMediaPath         string            `koanf:"ai-media-path"`
+	GeminiKey           string            `koanf:"gemini-key"`
+	GeminiExplicitCache *bool             `koanf:"gemini-explicit-cache"`
+	Sub2APIKey          string            `koanf:"sub2api-key"`
+	Sub2APIBaseURL      string            `koanf:"sub2api-base-url"`
+	DeepSeekKey         string            `koanf:"deepseek-key"`
+	DeepSeekBaseURL     string            `koanf:"deepseek-base-url"`
 }
 
 const (
@@ -119,16 +120,8 @@ var moderator = NewPtrLinkedCfg(
 	func(old, new *Config) bool {
 		return old.ContentModerator != new.ContentModerator
 	},
-	func(new *Config) *azure.ModeratorV2 {
-		return &azure.ModeratorV2{
-			Client: *azure.NewClient(
-				new.ContentModerator.Endpoint,
-				new.ContentModerator.ApiKey,
-				azure.ContentModeratorV2Path,
-			),
-			Categories: []string{azure.ModerateV2CatSexual},
-			OutputType: "FourSeverityLevels",
-		}
+	func(new *Config) *cloudflare.Moderator {
+		return cloudflare.NewModerator(new.ContentModerator)
 	},
 )
 
@@ -254,7 +247,7 @@ func Ocr() *azure.Ocr {
 	return ocr.Get()
 }
 
-func Moderator() *azure.ModeratorV2 {
+func Moderator() *cloudflare.Moderator {
 	return moderator.Get()
 }
 

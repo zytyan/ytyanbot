@@ -51,3 +51,10 @@ These instructions apply to the whole repository.
 - The inner HTTP server defaults to loopback. `GOYTYAN_BACKUP_TOKEN` authenticates every route, including statistics, logger controls, pprof, and backups; refuse non-loopback listeners when the token is empty.
 - V1 to V2 conversion must use `cmd/ai-db-migrate`: open the source read-only, create a staging copy with SQLite Backup, read legacy rows through `internal/aidbmigrate/legacyq`, write V2 rows through `globalcfg/aiq`, validate counts/tokens/assistant payloads/media/integrity/foreign keys, then publish a `VACUUM INTO` database, media tree, and Manifest. Never point its output paths at existing production assets.
 - Treat `gemini_messages` and `gemini_session_migrations` as retired V0 AI tables. The offline migrator must merge non-duplicate V0 messages into V2 before dropping both tables; do not rely on the `gemini_sessions` foreign-key cascade, because it silently loses V0-only history.
+
+## Image moderation
+
+- Image moderation uses Cloudflare Workers AI `@cf/cloudflare/clef-flash` through direct HTTP calls. Configure `content-moderator.account-id` and `content-moderator.api-token` in runtime YAML; never commit credentials. Azure remains only for OCR.
+- Keep the Microsoft Sexual IMAGE severity criteria in `helpers/cloudflare/moderator.go` and return only 0/2/4/6 from a choice question. Preserve existing Telegram replies, statistics, user ratings, and historical image scores; failed or malformed responses must never be saved as score 0.
+- Normalize image inputs to JPEG with a maximum 768-pixel edge and 128 KiB payload before inference. Send only the severity question, with bounded request timeouts and no Azure fallback.
+- Verify provider request/response handling with local HTTP tests, run `go test ./...`, and build with production `-tags=jsoniter` before deployment.

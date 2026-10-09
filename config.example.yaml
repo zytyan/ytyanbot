@@ -5,8 +5,8 @@ god: 123456789
 
 
 content-moderator:
-  endpoint: "https://example-ocr.cognitiveservices.azure.com"
-  api-key: "1234567890abcdef"
+  account-id: "example-cloudflare-account"
+  api-token: "example-workers-ai-token"
 ocr:
   endpoint: "https://example-ocr.cognitiveservices.azure.com"
   api-key: '1234567890abcdef'

@@ -3,7 +3,6 @@ package azure
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,8 +16,7 @@ const defaultRequestTimeout = 30 * time.Second
 
 //goland:noinspection GoUnusedConst
 const (
-	ContentModeratorV2Path = "/contentsafety/image:analyze?api-version=2024-09-01"
-	OcrPath                = "/computervision/imageanalysis:analyze"
+	OcrPath = "/computervision/imageanalysis:analyze"
 )
 
 type ResponseError struct {
@@ -154,65 +152,4 @@ func (r *OcrResult) Text() string {
 	}
 	return buf.String()
 
-}
-
-//goland:noinspection GoUnusedConst
-const (
-	ModerateV2CatSexual = "Sexual"
-)
-
-type ModeratorV2Result struct {
-	CategoriesAnalysis []struct {
-		Category string `json:"category"`
-		Severity int    `json:"severity"`
-	} `json:"categoriesAnalysis"`
-}
-
-type moderatorV2Param struct {
-	Image struct {
-		Content string `json:"content"`
-	} `json:"image"`
-	Categories []string `json:"categories"`
-	OutputType string   `json:"outputType"`
-}
-
-type ModeratorV2 struct {
-	Client
-	Categories []string `json:"categories"`
-	OutputType string   `json:"outputType"`
-}
-
-func (m *ModeratorV2) EvalDataContext(ctx context.Context, data []byte) (*ModeratorV2Result, error) {
-	req, err := m.reqWithAuth(ctx, http.MethodPost, "application/json")
-	if err != nil {
-		return nil, err
-	}
-	b64Data := base64.StdEncoding.EncodeToString(data)
-	param := moderatorV2Param{
-		Categories: m.Categories,
-		OutputType: m.OutputType,
-	}
-	param.Image.Content = b64Data
-	body, err := jsoniter.Marshal(&param)
-	if err != nil {
-		return nil, err
-	}
-	req.Body = io.NopCloser(bytes.NewReader(body))
-	req.ContentLength = int64(len(body))
-	resp, err := m.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	result := &ModeratorV2Result{}
-	err = unmarshalResponse(resp, result)
-	return result, err
-}
-
-func (r *ModeratorV2Result) GetSeverityByCategory(category string) int {
-	for _, analysis := range r.CategoriesAnalysis {
-		if analysis.Category == category {
-			return analysis.Severity
-		}
-	}
-	return -1
 }

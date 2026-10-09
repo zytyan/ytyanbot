@@ -5,7 +5,7 @@ import (
 	"fmt"
 	g "main/globalcfg"
 	"main/globalcfg/h"
-	"main/helpers/azure"
+	"main/helpers/cloudflare"
 	"regexp"
 	"strings"
 	"sync"
@@ -78,8 +78,8 @@ var nsfwReplyMsgList = [2][3]string{
 	{"给bot也看看~", "悄悄看一眼~", "不敢看~"},
 }
 
-func replyNsfw(bot *gotgbot.Bot, msg *gotgbot.Message, result *azure.ModeratorV2Result) (bool, error) {
-	severity := result.GetSeverityByCategory(azure.ModerateV2CatSexual)
+func replyNsfw(bot *gotgbot.Bot, msg *gotgbot.Message, result *cloudflare.Result) (bool, error) {
+	severity := result.Severity
 	if severity < 2 {
 		return false, nil
 	} else if severity > 7 {
@@ -212,7 +212,7 @@ func CmdScore(bot *gotgbot.Bot, ctx *ext.Context) (err error) {
 		}
 		return err
 	}
-	severity := result.GetSeverityByCategory(azure.ModerateV2CatSexual)
+	severity := result.Severity
 	go saveNsfw(photo.FileUniqueId, photo.FileId, severity)
 	savedPic, err := g.Q.GetNsfwPicByFileUid(context.Background(), photo.FileUniqueId)
 	userRate := severity

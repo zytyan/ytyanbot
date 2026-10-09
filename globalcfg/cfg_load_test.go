@@ -27,8 +27,8 @@ func TestLoadConfig(t *testing.T) {
 	as.Equal([]int64{-1001471592463}, cfg.MyChats)
 	as.Nil(cfg.AIChats)
 
-	as.Equal("https://example-ocr.cognitiveservices.azure.com", cfg.ContentModerator.Endpoint)
-	as.Equal("1234567890abcdef", cfg.ContentModerator.ApiKey)
+	as.Equal("example-cloudflare-account", cfg.ContentModerator.AccountID)
+	as.Equal("example-workers-ai-token", cfg.ContentModerator.APIToken)
 	as.Equal("https://example-ocr.cognitiveservices.azure.com", cfg.Ocr.Endpoint)
 	as.Equal("1234567890abcdef", cfg.Ocr.ApiKey)
 	as.Equal("2023-10-01", cfg.Ocr.ApiVer)

@@ -41,17 +41,3 @@ func TestOcrDataContextPropagatesCancellation(t *testing.T) {
 		t.Fatalf("OCR error = %v, want context cancellation", err)
 	}
 }
-
-func TestModeratorDataContextPropagatesCancellation(t *testing.T) {
-	client := NewClient("https://example.test", "key", ContentModeratorV2Path)
-	client.client.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		<-request.Context().Done()
-		return nil, request.Context().Err()
-	})
-	moderator := &ModeratorV2{Client: *client}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := moderator.EvalDataContext(ctx, []byte("image")); !errors.Is(err, context.Canceled) {
-		t.Fatalf("moderator error = %v, want context cancellation", err)
-	}
-}

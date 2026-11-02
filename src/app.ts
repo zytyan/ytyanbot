@@ -174,6 +174,7 @@ function toIncoming(message: Message, withReply = true): IncomingAiMessage {
     messageId: message.message_id,
     sentAt: message.date,
     userId: from?.id ?? message.sender_chat?.id ?? 0,
+    isBot: from?.is_bot ?? false,
     username: from
       ? [from.first_name, from.last_name].filter(Boolean).join(" ")
       : message.sender_chat?.title ?? "未知用户",

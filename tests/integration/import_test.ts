@@ -82,7 +82,7 @@ Deno.test("Go V11 import preserves rows/tokens/payload/media/votes and leaves so
     assertEquals(manifest.tokens, { input: 11, output: 5, cached: 0 });
     const target = new MainDatabase(`${root}/target/dataset/main.db`, { readOnly: true });
     try {
-      assertEquals(target.validate().version, 4);
+      assertEquals(target.validate().version, 5);
       assertEquals((manifest.albumMapping as { groups: number }).groups, 1);
       assertEquals((manifest.albumMapping as { files: number }).files, 1);
       assertEquals(target.get("SELECT topic_id,group_id,file_id FROM album_files"), {

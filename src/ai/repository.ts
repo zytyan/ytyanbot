@@ -271,77 +271,123 @@ WHERE mm.chat_id=? AND mm.msg_id=? ORDER BY mm.ordinal`,
     });
   }
 
-  beginRun(sessionId: number, input: readonly PendingAiMessage[], now: number): RunRow {
-    if (input.length === 0) throw new Error("cannot start AI run without a request message");
+  isLoopSuppressed(chatId: number, messageId: number): boolean {
+    return this.db.get(SQL.IsLoopSuppressedRequest, chatId, messageId) !== undefined;
+  }
+
+  beginRequest(
+    sessionId: number,
+    input: readonly PendingAiMessage[],
+    now: number,
+    isBot: boolean,
+  ): RunRow | undefined {
+    if (input.length === 0) throw new Error("cannot start AI request without a request message");
     return this.db.transaction(() => {
-      let position = this.db.get<{ position: number }>(
-        "SELECT CAST(COALESCE(MAX(position)+1,0) AS INTEGER) AS position FROM ai_session_messages WHERE session_id=?",
-        sessionId,
-      )?.position ?? 0;
-      for (const pending of input) {
-        const message = pending.message;
-        this.db.run(
-          `INSERT INTO ai_messages(chat_id,msg_id,sent_at,user_id,username,atable_username,msg_type,text,reply_to_msg_id)
-VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(chat_id,msg_id) DO NOTHING`,
-          message.chatId,
-          message.messageId,
-          message.sentAt,
-          message.userId,
-          message.username,
-          message.atableUsername ?? null,
-          message.messageType,
-          message.text ?? null,
-          message.replyToMessageId ?? null,
-        );
-        for (let ordinal = 0; ordinal < pending.mediaObjects.length; ordinal++) {
-          const media = pending.mediaObjects[ordinal]!;
-          this.db.run(
-            `INSERT INTO media_objects(sha256,relative_path,byte_size,mime_type,created_at)
-VALUES(?,?,?,?,?) ON CONFLICT(sha256) DO NOTHING`,
-            media.sha256,
-            media.relativePath,
-            media.byteSize,
-            media.mimeType,
-            now,
-          );
-          this.db.run(
-            `INSERT INTO ai_message_media(chat_id,msg_id,ordinal,media_sha256,media_kind)
-VALUES(?,?,?,?,?) ON CONFLICT(chat_id,msg_id,ordinal) DO NOTHING`,
-            message.chatId,
-            message.messageId,
-            ordinal,
-            media.sha256,
-            media.kind,
-          );
-        }
-        this.db.run(
-          `INSERT INTO ai_session_messages(session_id,position,chat_id,msg_id,role,quote_part,context_only)
-VALUES(?,?,?,?,?,?,?) ON CONFLICT(session_id,chat_id,msg_id) DO NOTHING`,
-          sessionId,
-          position++,
-          message.chatId,
-          message.messageId,
-          message.role,
-          message.quotePart ?? null,
-          pending.contextOnly ? 1 : 0,
-        );
-      }
-      this.db.run("UPDATE ai_sessions SET updated_at=? WHERE id=?", now, sessionId);
       const request = input.at(-1)!.message;
-      const target = this.getSession(sessionId);
-      if (!target) throw new Error(`AI session ${sessionId} vanished`);
-      this.db.run(
-        `INSERT INTO ai_runs(session_id,request_chat_id,request_msg_id,status,provider,model,requested_at)
-VALUES(?,?,?,'pending',?,?,?) ON CONFLICT(session_id,request_chat_id,request_msg_id) DO UPDATE SET id=id`,
+      const previous = this.db.get<{ suppressed: number }>(
+        SQL.GetSessionRequestOrigin,
         sessionId,
         request.chatId,
         request.messageId,
-        target.provider,
-        target.model,
-        now,
       );
-      return this.getRunByRequest(sessionId, request.chatId, request.messageId)!;
+      if (previous) {
+        return previous.suppressed
+          ? undefined
+          : this.getRunByRequest(sessionId, request.chatId, request.messageId);
+      }
+      const last = this.db.get<{ bot_streak: number }>(SQL.LastSessionRequestOrigin, sessionId);
+      const streak = isBot ? Math.min(3, (last?.bot_streak ?? 0) + 1) : 0;
+      const run = streak >= 3 ? undefined : this.#beginRun(sessionId, input, now);
+      if (streak >= 3) this.#saveInput(sessionId, input, now);
+      this.db.run(
+        SQL.SaveSessionRequestOrigin,
+        sessionId,
+        request.chatId,
+        request.messageId,
+        streak,
+        streak >= 3 ? 1 : 0,
+      );
+      return run;
     });
+  }
+
+  #saveInput(sessionId: number, input: readonly PendingAiMessage[], now: number): void {
+    let position = this.db.get<{ position: number }>(
+      "SELECT CAST(COALESCE(MAX(position)+1,0) AS INTEGER) AS position FROM ai_session_messages WHERE session_id=?",
+      sessionId,
+    )?.position ?? 0;
+    for (const pending of input) {
+      const message = pending.message;
+      this.db.run(
+        `INSERT INTO ai_messages(chat_id,msg_id,sent_at,user_id,username,atable_username,msg_type,text,reply_to_msg_id)
+VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(chat_id,msg_id) DO NOTHING`,
+        message.chatId,
+        message.messageId,
+        message.sentAt,
+        message.userId,
+        message.username,
+        message.atableUsername ?? null,
+        message.messageType,
+        message.text ?? null,
+        message.replyToMessageId ?? null,
+      );
+      for (let ordinal = 0; ordinal < pending.mediaObjects.length; ordinal++) {
+        const media = pending.mediaObjects[ordinal]!;
+        this.db.run(
+          `INSERT INTO media_objects(sha256,relative_path,byte_size,mime_type,created_at)
+VALUES(?,?,?,?,?) ON CONFLICT(sha256) DO NOTHING`,
+          media.sha256,
+          media.relativePath,
+          media.byteSize,
+          media.mimeType,
+          now,
+        );
+        this.db.run(
+          `INSERT INTO ai_message_media(chat_id,msg_id,ordinal,media_sha256,media_kind)
+VALUES(?,?,?,?,?) ON CONFLICT(chat_id,msg_id,ordinal) DO NOTHING`,
+          message.chatId,
+          message.messageId,
+          ordinal,
+          media.sha256,
+          media.kind,
+        );
+      }
+      this.db.run(
+        `INSERT INTO ai_session_messages(session_id,position,chat_id,msg_id,role,quote_part,context_only)
+VALUES(?,?,?,?,?,?,?) ON CONFLICT(session_id,chat_id,msg_id) DO NOTHING`,
+        sessionId,
+        position++,
+        message.chatId,
+        message.messageId,
+        message.role,
+        message.quotePart ?? null,
+        pending.contextOnly ? 1 : 0,
+      );
+    }
+    this.db.run("UPDATE ai_sessions SET updated_at=? WHERE id=?", now, sessionId);
+  }
+
+  beginRun(sessionId: number, input: readonly PendingAiMessage[], now: number): RunRow {
+    return this.db.transaction(() => this.#beginRun(sessionId, input, now));
+  }
+
+  #beginRun(sessionId: number, input: readonly PendingAiMessage[], now: number): RunRow {
+    if (input.length === 0) throw new Error("cannot start AI run without a request message");
+    this.#saveInput(sessionId, input, now);
+    const request = input.at(-1)!.message;
+    const target = this.getSession(sessionId);
+    if (!target) throw new Error(`AI session ${sessionId} vanished`);
+    this.db.run(
+      `INSERT INTO ai_runs(session_id,request_chat_id,request_msg_id,status,provider,model,requested_at)
+VALUES(?,?,?,'pending',?,?,?) ON CONFLICT(session_id,request_chat_id,request_msg_id) DO UPDATE SET id=id`,
+      sessionId,
+      request.chatId,
+      request.messageId,
+      target.provider,
+      target.model,
+      now,
+    );
+    return this.getRunByRequest(sessionId, request.chatId, request.messageId)!;
   }
 
   getRunByRequest(sessionId: number, chatId: number, messageId: number): RunRow | undefined {

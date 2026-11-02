@@ -34,6 +34,7 @@ export interface IncomingAiMessage {
   readonly messageId: number;
   readonly sentAt: number;
   readonly userId: number;
+  readonly isBot?: boolean;
   readonly username: string;
   readonly atableUsername?: string;
   readonly text?: string;
@@ -182,6 +183,7 @@ export class AiService {
 
   async handle(message: IncomingAiMessage, stopEarlyActivity?: () => void): Promise<void> {
     if (!this.config().aiChats.includes(message.chatId)) return;
+    if (this.repository.isLoopSuppressed(message.chatId, message.messageId)) return;
     const routing = parseSessionRouting(message.text ?? "");
     const previous = this.repository.runForRequest(message.chatId, message.messageId);
     if (previous?.status === "delivered") return;
@@ -258,7 +260,10 @@ export class AiService {
       incoming.chatId,
       incoming.messageId,
     );
-    if (existing?.status === "delivered") return;
+    if (
+      existing?.status === "delivered" ||
+      this.repository.isLoopSuppressed(incoming.chatId, incoming.messageId)
+    ) return;
     const pending: PendingAiMessage[] = [];
     try {
       if (
@@ -297,8 +302,9 @@ export class AiService {
     const run = existing ??
       latencySyncStage(
         "ai.persist.pending",
-        () => this.repository.beginRun(session.id, pending, now),
+        () => this.repository.beginRequest(session.id, pending, now, incoming.isBot ?? false),
       );
+    if (!run) return;
     traceTags({ run_id: run.id });
     if (run.status === "delivered") return;
     if (run.status === "model_failed" || run.status === "persistence_failed") {
@@ -353,9 +359,8 @@ export class AiService {
             model: session.model,
             systemPrompt: this.#renderPrompt(promptTemplate, incoming),
             messages: window,
-            newMessages: window.filter((item) =>
-              pending.some((value) => value.message.messageId === item.messageId)
-            ),
+            // Include stored-only bot inputs when resuming a remote Interactions chain.
+            newMessages: window.slice(window.findLastIndex((item) => item.role === "model") + 1),
             historyRebuildLossy: session.historyRebuildLossy,
             allowCodeExecution: window.every((item) =>
               item.media.every((media) => !media.mimeType.startsWith("video/"))

@@ -90,3 +90,15 @@ DELETE FROM ai_session_suspensions WHERE session_id=?;
 
 -- name: IsSessionSuspended
 SELECT 1 AS found FROM ai_session_suspensions WHERE session_id=? AND (until_at IS NULL OR until_at>?);
+
+-- name: GetSessionRequestOrigin
+SELECT suppressed FROM ai_session_request_origins WHERE session_id=? AND chat_id=? AND msg_id=?;
+
+-- name: LastSessionRequestOrigin
+SELECT bot_streak FROM ai_session_request_origins WHERE session_id=? ORDER BY id DESC LIMIT 1;
+
+-- name: SaveSessionRequestOrigin
+INSERT INTO ai_session_request_origins(session_id,chat_id,msg_id,bot_streak,suppressed) VALUES(?,?,?,?,?);
+
+-- name: IsLoopSuppressedRequest
+SELECT 1 AS found FROM ai_session_request_origins WHERE chat_id=? AND msg_id=? AND suppressed=1 LIMIT 1;

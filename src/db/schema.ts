@@ -4,6 +4,7 @@ export const CANONICAL_SCHEMA = [
   "-- Only file metadata, never captions or ordinary chat text.\nCREATE TABLE album_index (\n  chat_id INTEGER NOT NULL,\n  topic_id INTEGER NOT NULL,\n  group_id TEXT NOT NULL,\n  expires_at INTEGER NOT NULL,\n  photo_only INTEGER NOT NULL CHECK(photo_only IN (0,1)),\n  PRIMARY KEY(chat_id,topic_id,group_id)\n) WITHOUT ROWID, STRICT;\nCREATE INDEX idx_album_index_expiry ON album_index(expires_at);\nCREATE TABLE album_files (\n  chat_id INTEGER NOT NULL,\n  topic_id INTEGER NOT NULL,\n  group_id TEXT NOT NULL,\n  msg_id INTEGER NOT NULL,\n  file_id TEXT NOT NULL,\n  file_unique_id TEXT NOT NULL,\n  byte_size INTEGER,\n  PRIMARY KEY(chat_id,topic_id,group_id,msg_id),\n  FOREIGN KEY(chat_id,topic_id,group_id) REFERENCES album_index(chat_id,topic_id,group_id) ON DELETE CASCADE\n) WITHOUT ROWID, STRICT;\nCREATE INDEX idx_album_files_message ON album_files(chat_id,topic_id,msg_id);\n",
   "-- Incoming-message deduplication runs before reaction and must not scan payload-bearing rows.\nCREATE INDEX idx_ai_runs_request ON ai_runs(request_chat_id,request_msg_id,id DESC);\n",
   "-- NULL means permanent suspension; deleting the row resumes the session.\nCREATE TABLE ai_session_suspensions (\n  session_id INTEGER PRIMARY KEY REFERENCES ai_sessions(id),\n  until_at INTEGER CHECK(until_at IS NULL OR until_at > 0)\n);\n",
+  "-- Only explicitly triggered session submissions are counted, never ordinary chat history.\nCREATE TABLE ai_session_request_origins (\n  id INTEGER PRIMARY KEY,\n  session_id INTEGER NOT NULL REFERENCES ai_sessions(id),\n  chat_id INTEGER NOT NULL,\n  msg_id INTEGER NOT NULL,\n  bot_streak INTEGER NOT NULL CHECK(bot_streak BETWEEN 0 AND 3),\n  suppressed INTEGER NOT NULL CHECK(suppressed IN (0,1)),\n  UNIQUE(session_id,chat_id,msg_id),\n  FOREIGN KEY(chat_id,msg_id) REFERENCES ai_messages(chat_id,msg_id)\n);\nCREATE INDEX idx_ai_session_request_origins_latest ON ai_session_request_origins(session_id,id DESC);\nCREATE INDEX idx_ai_session_request_origins_suppressed ON ai_session_request_origins(chat_id,msg_id) WHERE suppressed=1;\n",
 ] as const;
 export const MIGRATIONS = [{
   "version": 1,
@@ -21,6 +22,10 @@ export const MIGRATIONS = [{
   "version": 4,
   "name": "ts_session_suspensions",
   "checksum": "377b981d8bfa6c87ff54e8f8e4e0c79acafd82bb72ee51af8535f3462a619ace",
+}, {
+  "version": 5,
+  "name": "ts_ai_loop_guard",
+  "checksum": "9f268e9f31d2f75ac0f39a1f215ae447cb17678ef0d7f637708a125da6427ec3",
 }] as const;
 export const REQUIRED_TABLES = [
   "ai_chat_settings",
@@ -30,6 +35,7 @@ export const REQUIRED_TABLES = [
   "ai_runs",
   "ai_session_messages",
   "ai_session_provider_state",
+  "ai_session_request_origins",
   "ai_session_suspensions",
   "ai_sessions",
   "ai_system_prompts",
@@ -58,6 +64,8 @@ export const REQUIRED_INDEXES = [
   "idx_ai_runs_request",
   "idx_ai_runs_session_requested",
   "idx_ai_session_messages_chat_msg_context",
+  "idx_ai_session_request_origins_latest",
+  "idx_ai_session_request_origins_suppressed",
   "idx_ai_sessions_chat_topic_updated",
   "idx_album_files_message",
   "idx_album_index_expiry",

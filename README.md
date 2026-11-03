@@ -156,3 +156,20 @@ Sub2API 模型列表可用，但当前 tiered 生成返回 404；用户已确认
 
 当前 TS 仓库及线上运行统一位于 `/opt/tgbots/ytyanbot`。旧 `ytyanbot-ts` 目录已停用，
 后续不要再从那里开发或部署。原 Go 的配置和离线数据保留在 `build/`；TS 数据位于 `run/`。
+
+## GitHub 自动构建与发布
+
+提交到 `master` 或提出 PR 时运行检查、测试及 Linux x86_64 构建，成功后可下载 Actions artifact。推送
+`v*` 标签（例如 `v1.0.0`）自动创建 Release，包含压缩包、SHA-256
+和包内源码提交记录。仓库运行配置、数据库、媒体和凭据不会进入发布包。
+
+也可在 Actions → Build and Release → Run workflow 手动运行；`release_tag`
+留空只构建，填入已存在的版本标签才发布该标签对应代码。已有 Release
+不自动覆盖，发布需要修改版本标签。无需额外配置个人令牌，发布 job 使用仓库自动提供的 GITHUB_TOKEN。
+
+构建产物面向 Debian 13/Linux x86_64；其他架构和系统版本不作保证。
+
+## 主分支
+
+`master` 现在是正在使用的 TypeScript/Deno 版本。原 Go master 完整保存在
+`archive/go-master-20261103`，现有其他 `archive/go/` 分支保持归档，不作为部署或发布来源。

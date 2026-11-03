@@ -59,10 +59,10 @@
   when their display text is empty.
 - Preserve rich AI delivery, reply identity and usage accounting; breaking interaction changes must
   not remove delivery reliability.
-- Work on codex/retain-features. Separate accepted features into commits, run deno task check and
-  deno task test, and push each accepted feature before the next. Explicitly requested plan
-  corrections may proceed while remote access is blocked; report the unsynced state and do not
-  silently expand runtime implementation.
+- Work on master (TypeScript/Deno). The former Go master is archived at archive/go-master-20261103.
+  Separate accepted features into commits, run deno task check and deno task test, and push each
+  accepted feature before the next. Explicitly requested plan corrections may proceed while remote
+  access is blocked; report the unsynced state and do not silently expand runtime implementation.
 - Never commit production config, secrets, databases, media, logs, backups or runtime files. Tests
   use temporary databases and intercepted APIs.
 - Never stop, restart or replace the live service without explicit approval. Compilation or

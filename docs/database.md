@@ -1,6 +1,6 @@
 # TS 数据库与 SQL 工作流
 
-运行时使用 TS V6。开发 checkout 为 `/root/mycode/ytyanbot`，直接在 `master` 实现；
+运行时使用 TS V8。开发 checkout 为 `/root/mycode/ytyanbot`，直接在 `master` 实现；
 `/opt/tgbots/ytyanbot` 仅为线上运行目录，修改代码或通过测试不授权部署。 本次检查 TS 基线
 `3e94dcfbea4779da4e1d34dc79ed4869c4909ee6`，归档 Go `ac67c5f7651d3e2a4a2225ae4bd3f3a9f455e979`。
 

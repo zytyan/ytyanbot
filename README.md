@@ -13,7 +13,7 @@
 [架构分析](docs/architecture-sdk-analysis.md)。普通 `/roll` 已补齐，包含旧 `delme`
 删除按钮兼容和离线测试。
 
-**TS 独立 V6 数据库与一次性离线导入器已实现**：运行时只接受 TS 库，Go canonical V9–V11 通过
+**TS 独立 V8 数据库与一次性离线导入器已实现**：运行时只接受 TS 库，Go canonical V9–V11 通过
 `db-import` 只读导入新目标目录，校验行数据、Token、payload、媒体与外键，并输出报告。
 导入失败不发布目标、不修改源库。AI-first 编排和传统事实注入已实现。AI 媒体使用 Telegram FileUniqueId
 标识，缺失缓存通过 FileId 补下载， 不计算内容哈希；精简存储与旧库离线归档方式见
@@ -45,7 +45,7 @@ src/
   download/    URL/Bilibili 处理、进程执行、缓存和 singleflight
   nsfw/        Cloudflare Clef-flash、图库和用户评分
   stats/       统计缓存、聚合和日报
-  db/          TS V6 schema、只读导入、初始化和严格检查
+  db/          TS V8 schema、只读导入、初始化和严格检查
   telegram/    grammY typed API 与 sendRichMessage 窄适配
   shared/      当前共享类型与有界并发原语（单实现端口计划收拢）
 ```
@@ -134,8 +134,8 @@ Sub2API 模型列表可用，但当前 tiered 生成返回 404；用户已确认
 
 ## 相册与运维
 
-相册七天只保存文件索引，不采集普通 caption。明确触发后聚合整组并延迟下载；
-混合媒体、过期/缺失索引、任一图片失败或超限都拒绝发送残缺相册。 当前请求及选中的回复 caption
+相册只保存文件索引，不采集普通 caption，索引不按时间过期。明确触发后聚合整组并延迟下载；
+混合媒体、缺失索引、任一图片失败或超限都拒绝发送残缺相册。 当前请求及选中的回复 caption
 才成为请求数据。历史 Go caption 完整归档。
 
 内部 HTTP 缺省 `127.0.0.1:4019`，`BOT_INNER_HTTP=OFF` 关闭； `GOYTYAN_BACKUP_TOKEN`

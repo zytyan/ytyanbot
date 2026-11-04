@@ -27,16 +27,16 @@
 | prpr/鱼图/webp2png      | 已实现并离线验收 | 保留生成/转换能力；必要时注入简洁操作结果，不恢复用户头像持久化                            |
 | 群配置                  | 已实现并离线验收 | 非 CoC 开关、权限与配置更新；按钮/字段可 breaking change，不能暴露密钥给 AI                |
 | 内部 HTTP/备份          | 已实现并离线验收 | 统计、日志、备份、鉴权、loopback 和等价诊断；按新数据模型实现                              |
-| 数据/媒体/运维          | TS V6、只读导入  | 新 TS schema + 离线导入；新目标数据库、映射报告、payload/token/媒体校验、备份和回滚        |
+| 数据/媒体/运维          | TS V8、只读导入  | 新 TS schema + 离线导入；新目标数据库、映射报告、payload/token/媒体校验、备份和回滚        |
 | CoC/跑团                | 明确裁剪         | 不迁移属性/检定/战斗运行时；历史属性另行归档，不自动删除                                   |
 
 ## 数据和相册约束
 
-运行时仅接受 TS V6 新库，Go V9–V11 与 TS V1–V5 由一次性离线导入器只读导入； 完整行摘要、Token、回放
-payload、媒体 hash/size 与外键均校验。CoC 和原远端状态完整归档。 相册七天只索引图片，不采集未触发的
-caption；明确触发时等待整组、延迟下载， 混合/过期/缺失/失败不能发送残缺组。当前/选中回复 caption
-才成为请求数据。 传统事实作为 user 数据，与 source feature、chat/topic、request/reply ID
-和状态分别持久化。
+运行时仅接受 TS V8 新库，Go V9–V11 与 TS V1–V5 由一次性离线导入器只读导入； 完整行摘要、Token、回放
+payload、媒体 hash/size 与外键均校验。CoC 和原远端状态完整归档。 相册只索引图片，不采集未触发的
+caption，索引不按时间过期；明确触发时等待整组、延迟下载，
+混合/缺失/失败不能发送残缺组。当前/选中回复 caption 才成为请求数据。 传统事实作为 user 数据，与
+source feature、chat/topic、request/reply ID 和状态分别持久化。
 
 已退役的 AI memory、群消息归档和搜索不重新引入。普通聊天不进入 AI 消息库，
 非触发不调用模型、摘要或付费显式缓存。
@@ -47,4 +47,4 @@ caption；明确触发时等待整组、延迟下载， 混合/过期/缺失/失
 数据库映射必须验证，不能用 breaking change 掩盖丢失数据。真实 provider/Telegram 验收按本次授权复用
 Go 配置，完成后直接切换当前服务。
 
-TS V6 的最小存储、Telegram 标识缓存及旧媒体离线归档以 [数据库说明](database.md) 为准。
+TS V8 的最小存储、Telegram 标识缓存及旧媒体离线归档以 [数据库说明](database.md) 为准。

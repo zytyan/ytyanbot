@@ -6,7 +6,7 @@ import { temporaryDatabase } from "./helpers.ts";
 Deno.test("TS-owned database contains exact migrations and required objects", async () => {
   const temporary = await temporaryDatabase();
   try {
-    assertEquals(temporary.db.validate().version, 7);
+    assertEquals(temporary.db.validate().version, 8);
     assertEquals(
       temporary.db.all<{ version: number; checksum: string }>(
         "SELECT version,checksum FROM ts_schema_versions ORDER BY version",
@@ -92,10 +92,10 @@ Deno.test("v2 upgrade adds indexed request lookup without rewriting history and 
     temp.db.run("UPDATE ts_schema_versions SET checksum=? WHERE version=1", MIGRATIONS[0].checksum);
     temp.db.upgrade({ offlineArchive: true });
     temp.db.upgrade(); // Re-running an accepted upgrade is harmless.
-    assertEquals(temp.db.validate().version, 7);
+    assertEquals(temp.db.validate().version, 8);
     assertEquals(
       temp.db.get(
-        "SELECT chat_id,topic_id,group_id,msg_id,file_id,file_unique_id,byte_size,expires_at,photo_only FROM album_files",
+        "SELECT chat_id,topic_id,group_id,msg_id,file_id,file_unique_id,byte_size,photo_only FROM album_files",
       ),
       {
         chat_id: -100,
@@ -105,9 +105,12 @@ Deno.test("v2 upgrade adds indexed request lookup without rewriting history and 
         file_id: "file-id",
         file_unique_id: "unique-id",
         byte_size: 123,
-        expires_at: 9999999999,
         photo_only: 1,
       },
+    );
+    assertEquals(
+      temp.db.get("SELECT name FROM pragma_table_info('album_files') WHERE name='expires_at'"),
+      undefined,
     );
     assertEquals(
       temp.db.all("SELECT id,chat_id,provider,model FROM ai_sessions"),

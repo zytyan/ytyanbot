@@ -7,6 +7,7 @@ export const CANONICAL_SCHEMA = [
   "-- Only explicitly triggered session submissions are counted, never ordinary chat history.\nCREATE TABLE ai_session_request_origins (\n  id INTEGER PRIMARY KEY,\n  session_id INTEGER NOT NULL REFERENCES ai_sessions(id),\n  chat_id INTEGER NOT NULL,\n  msg_id INTEGER NOT NULL,\n  bot_streak INTEGER NOT NULL CHECK(bot_streak BETWEEN 0 AND 3),\n  suppressed INTEGER NOT NULL CHECK(suppressed IN (0,1)),\n  UNIQUE(session_id,chat_id,msg_id),\n  FOREIGN KEY(chat_id,msg_id) REFERENCES ai_messages(chat_id,msg_id)\n);\nCREATE INDEX idx_ai_session_request_origins_latest ON ai_session_request_origins(session_id,id DESC);\nCREATE INDEX idx_ai_session_request_origins_suppressed ON ai_session_request_origins(chat_id,msg_id) WHERE suppressed=1;\n",
   "-- Populated pre-v6 databases must be converted offline with db-import.\n-- The offline source snapshot and media archive retain omitted historical data.\nDROP TABLE ai_run_context;\nDROP TABLE import_archives;\nALTER TABLE ai_runs DROP COLUMN raw_payload;\nALTER TABLE ai_runs DROP COLUMN thought_signature;\nALTER TABLE ai_runs DROP COLUMN cache_expire_at;\nALTER TABLE ai_sessions DROP COLUMN total_input_tokens;\nALTER TABLE ai_sessions DROP COLUMN total_output_tokens;\nALTER TABLE ai_sessions DROP COLUMN total_cached_input_tokens;\nDROP TABLE ai_message_media;\nDROP TABLE media_objects;\nCREATE TABLE media_objects (\n file_unique_id TEXT PRIMARY KEY CHECK(length(file_unique_id)>0),\n file_id TEXT NOT NULL CHECK(length(file_id)>0),\n byte_size INTEGER NOT NULL CHECK(byte_size>=0),\n mime_type TEXT NOT NULL CHECK(length(mime_type)>0)\n) WITHOUT ROWID, STRICT;\nCREATE TABLE ai_message_media (\n chat_id INTEGER NOT NULL, msg_id INTEGER NOT NULL,\n ordinal INTEGER NOT NULL CHECK(ordinal>=0),\n file_unique_id TEXT REFERENCES media_objects(file_unique_id),\n media_kind TEXT NOT NULL,\n unavailable INTEGER NOT NULL DEFAULT 0 CHECK(unavailable IN (0,1)),\n CHECK((file_unique_id IS NULL) = (unavailable=1)),\n PRIMARY KEY(chat_id,msg_id,ordinal),\n FOREIGN KEY(chat_id,msg_id) REFERENCES ai_messages(chat_id,msg_id)\n) WITHOUT ROWID, STRICT;\nCREATE INDEX idx_ai_message_media_file ON ai_message_media(file_unique_id);\n-- Delivered display text already lives on the linked Telegram reply message.\nUPDATE ai_runs SET response_text=NULL WHERE status='delivered' AND response_text=(\n SELECT text FROM ai_messages WHERE chat_id=ai_runs.response_chat_id AND msg_id=ai_runs.response_msg_id\n);\n",
   "-- The per-file rows already carry the album key; keep group metadata on each row.\nCREATE TABLE album_files_v7 (\n  chat_id INTEGER NOT NULL,\n  topic_id INTEGER NOT NULL,\n  group_id TEXT NOT NULL,\n  msg_id INTEGER NOT NULL,\n  file_id TEXT NOT NULL,\n  file_unique_id TEXT NOT NULL,\n  byte_size INTEGER,\n  expires_at INTEGER NOT NULL,\n  photo_only INTEGER NOT NULL CHECK(photo_only IN (0,1)),\n  PRIMARY KEY(chat_id,topic_id,group_id,msg_id)\n) WITHOUT ROWID, STRICT;\nINSERT INTO album_files_v7(chat_id,topic_id,group_id,msg_id,file_id,file_unique_id,byte_size,expires_at,photo_only)\nSELECT f.chat_id,f.topic_id,f.group_id,f.msg_id,f.file_id,f.file_unique_id,f.byte_size,a.expires_at,a.photo_only\nFROM album_files f JOIN album_index a USING(chat_id,topic_id,group_id);\nDROP TABLE album_files;\nDROP TABLE album_index;\nALTER TABLE album_files_v7 RENAME TO album_files;\nCREATE INDEX idx_album_files_message ON album_files(chat_id,topic_id,msg_id);\nCREATE INDEX idx_album_files_expiry ON album_files(expires_at);\n",
+  "-- Album file indexes no longer expire, so do not persist a redundant expiry timestamp.\nCREATE TABLE album_files_v8 (\n  chat_id INTEGER NOT NULL,\n  topic_id INTEGER NOT NULL,\n  group_id TEXT NOT NULL,\n  msg_id INTEGER NOT NULL,\n  file_id TEXT NOT NULL,\n  file_unique_id TEXT NOT NULL,\n  byte_size INTEGER,\n  photo_only INTEGER NOT NULL CHECK(photo_only IN (0,1)),\n  PRIMARY KEY(chat_id,topic_id,group_id,msg_id)\n) WITHOUT ROWID, STRICT;\nINSERT INTO album_files_v8(chat_id,topic_id,group_id,msg_id,file_id,file_unique_id,byte_size,photo_only)\nSELECT chat_id,topic_id,group_id,msg_id,file_id,file_unique_id,byte_size,photo_only FROM album_files;\nDROP TABLE album_files;\nALTER TABLE album_files_v8 RENAME TO album_files;\nCREATE INDEX idx_album_files_message ON album_files(chat_id,topic_id,msg_id);\n",
 ] as const;
 export const MIGRATIONS = [{
   "version": 1,
@@ -36,6 +37,10 @@ export const MIGRATIONS = [{
   "version": 7,
   "name": "ts_single_album_table",
   "checksum": "d61746f660318f03f236463cd303d99499146278d29e486bb47f09de84178d5d",
+}, {
+  "version": 8,
+  "name": "ts_remove_album_expiry",
+  "checksum": "c52dd13352b41feed48c5b4a82f14f475096c9b5f8813c9974604b0bc8536802",
 }] as const;
 export const REQUIRED_TABLES = [
   "ai_chat_settings",
@@ -74,7 +79,6 @@ export const REQUIRED_INDEXES = [
   "idx_ai_session_request_origins_latest",
   "idx_ai_session_request_origins_suppressed",
   "idx_ai_sessions_chat_topic_updated",
-  "idx_album_files_expiry",
   "idx_album_files_message",
   "idx_bili_inline_results_created_at",
   "idx_traditional_facts_reply",

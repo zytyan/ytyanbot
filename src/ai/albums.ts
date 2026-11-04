@@ -4,7 +4,6 @@ import { SQL } from "../db/queries.ts";
 import type { IncomingMedia } from "./service.ts";
 import { topicId } from "../telegram/topic.ts";
 
-const ttlSeconds = 7 * 86400;
 export function albumIndex(db: MainDatabase, idleMs = 1000, maxWaitMs = 5000) {
   const activity = new Map<string, { seen: number; claimedAt?: number }>();
   const key = (message: Message, group: string) =>
@@ -31,7 +30,6 @@ export function albumIndex(db: MainDatabase, idleMs = 1000, maxWaitMs = 5000) {
           photo.file_id,
           photo.file_unique_id,
           photo.file_size ?? null,
-          message.date + ttlSeconds,
           1,
         );
       } else {
@@ -48,7 +46,6 @@ export function albumIndex(db: MainDatabase, idleMs = 1000, maxWaitMs = 5000) {
             item.file_id,
             item.file_unique_id ?? "",
             item.file_size ?? null,
-            message.date + ttlSeconds,
             0,
           );
         }
@@ -91,15 +88,13 @@ export function albumIndex(db: MainDatabase, idleMs = 1000, maxWaitMs = 5000) {
           if (signal.aborted) abort();
         });
       }
-      const metadata = db.get<{ topic_id: number; expires_at: number; photo_only: number }>(
+      const metadata = db.get<{ topic_id: number; photo_only: number }>(
         SQL.GetAlbum,
         message.chat.id,
         topicId(message),
         group,
       );
-      if (!metadata || metadata.expires_at <= Math.floor(Date.now() / 1000)) {
-        throw new Error("图片组不存在或已超过七天，无法载入完整图片组。");
-      }
+      if (!metadata) throw new Error("图片组索引不存在，无法载入完整图片组。");
       if (!metadata.photo_only) throw new Error("暂不支持包含视频、文档或其他媒体的混合图片组。");
       const rows = db.all<
         { msg_id: number; file_id: string; file_unique_id: string; byte_size: number | null }
@@ -113,8 +108,7 @@ export function albumIndex(db: MainDatabase, idleMs = 1000, maxWaitMs = 5000) {
         byteSize: row.byte_size ?? undefined,
       }));
     },
-    cleanup(unix = Math.floor(Date.now() / 1000)) {
-      db.run(SQL.ExpireAlbums, unix);
+    cleanup() {
       for (const [id, value] of activity) if (Date.now() - value.seen > 60_000) activity.delete(id);
     },
   };

@@ -25,12 +25,11 @@ export const SQL = {
   "BackupMedia":
     "SELECT file_unique_id,file_id,byte_size,mime_type FROM media_objects ORDER BY file_unique_id;",
   "IndexAlbumFile":
-    "INSERT INTO album_files(chat_id,topic_id,group_id,msg_id,file_id,file_unique_id,byte_size,expires_at,photo_only) VALUES(?,?,?,?,?,?,?,?,?)\nON CONFLICT(chat_id,topic_id,group_id,msg_id) DO UPDATE SET file_id=excluded.file_id,file_unique_id=excluded.file_unique_id,byte_size=excluded.byte_size,expires_at=MAX(expires_at,excluded.expires_at),photo_only=MIN(photo_only,excluded.photo_only);",
+    "INSERT INTO album_files(chat_id,topic_id,group_id,msg_id,file_id,file_unique_id,byte_size,photo_only) VALUES(?,?,?,?,?,?,?,?)\nON CONFLICT(chat_id,topic_id,group_id,msg_id) DO UPDATE SET file_id=excluded.file_id,file_unique_id=excluded.file_unique_id,byte_size=excluded.byte_size,photo_only=MIN(photo_only,excluded.photo_only);",
   "GetAlbum":
-    "SELECT topic_id,expires_at,photo_only FROM album_files WHERE chat_id=? AND topic_id IN (?, -1) AND group_id=? ORDER BY topic_id DESC LIMIT 1;",
+    "SELECT topic_id,photo_only FROM album_files WHERE chat_id=? AND topic_id IN (?, -1) AND group_id=? ORDER BY topic_id DESC LIMIT 1;",
   "AlbumFiles":
     "SELECT msg_id,file_id,file_unique_id,byte_size FROM album_files WHERE chat_id=? AND topic_id=? AND group_id=? ORDER BY msg_id;",
-  "ExpireAlbums": "DELETE FROM album_files WHERE expires_at<=?;",
   "AlbumForMessage":
     "SELECT group_id FROM album_files WHERE chat_id=? AND topic_id IN (?, -1) AND msg_id=? ORDER BY topic_id DESC LIMIT 1;",
   "SessionHasMessage":

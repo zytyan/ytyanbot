@@ -3,7 +3,7 @@ import type { Message } from "grammy/types";
 import { albumIndex } from "../../src/ai/albums.ts";
 import { temporaryDatabase } from "./helpers.ts";
 
-Deno.test("album indexes only files, assembles in message order, isolates topics and rejects mixed or expired groups", async () => {
+Deno.test("album indexes persist files, assemble in order, isolate topics and reject mixed groups", async () => {
   const temporary = await temporaryDatabase();
   const now = Math.floor(Date.now() / 1000);
   const message = (id: number, extra: object = {}) =>
@@ -49,6 +49,15 @@ Deno.test("album indexes only files, assembles in message order, isolates topics
         new AbortController().signal,
       )
     );
+    index.cleanup();
+    assertEquals(temporary.db.all("SELECT * FROM album_files").length, 2);
+    assertEquals(
+      (await index.media(
+        message(1, { date: now - 365 * 86400 }),
+        new AbortController().signal,
+      ))!.map((item) => item.fileId),
+      ["file-1", "file-2"],
+    );
     index.capture(message(3, { photo: undefined, video: { file_id: "video" } }));
     const mixed = await assertRejects(
       () => index.media(message(1), new AbortController().signal),
@@ -56,9 +65,7 @@ Deno.test("album indexes only files, assembles in message order, isolates topics
     );
     assertStringIncludes(mixed.message, "混合");
     await assertRejects(() => index.media(message(1), AbortSignal.abort()));
-    index.cleanup(now + 7 * 86400);
-    assertEquals(temporary.db.all("SELECT * FROM album_files"), []);
-    await assertRejects(() => index.media(message(1), new AbortController().signal));
+    assertEquals(temporary.db.all("SELECT * FROM album_files").length, 3);
   } finally {
     await temporary.close();
   }

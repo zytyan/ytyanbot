@@ -21,28 +21,38 @@ export function albumIndex(db: MainDatabase, idleMs = 1000, maxWaitMs = 5000) {
       const group = message.media_group_id;
       if (!group) return;
       const photo = message.photo?.at(-1), topic = topicId(message);
-      db.transaction(() => {
+      if (photo) {
         db.run(
-          SQL.IndexAlbum,
+          SQL.IndexAlbumFile,
           message.chat.id,
           topic,
           group,
+          message.message_id,
+          photo.file_id,
+          photo.file_unique_id,
+          photo.file_size ?? null,
           message.date + ttlSeconds,
-          photo ? 1 : 0,
+          1,
         );
-        if (photo) {
+      } else {
+        // Mixed groups still need a row carrying the group metadata for rejection.
+        const file = message.video ?? message.document ?? message.animation ?? message.audio;
+        if (file) {
+          const item = file as { file_id: string; file_unique_id: string; file_size?: number };
           db.run(
             SQL.IndexAlbumFile,
             message.chat.id,
             topic,
             group,
             message.message_id,
-            photo.file_id,
-            photo.file_unique_id,
-            photo.file_size ?? null,
+            item.file_id,
+            item.file_unique_id ?? "",
+            item.file_size ?? null,
+            message.date + ttlSeconds,
+            0,
           );
         }
-      });
+      }
       const id = key(message, group), previous = activity.get(id);
       activity.delete(id);
       activity.set(id, { seen: Date.now(), claimedAt: previous?.claimedAt });

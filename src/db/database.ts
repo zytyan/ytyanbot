@@ -197,6 +197,7 @@ export class MainDatabase {
         "raw_update",
         "edit_history",
         "meili_wal",
+        "album_index",
       ]
     ) {
       const exists = this.get<{ found: number }>(

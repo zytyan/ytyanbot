@@ -1,6 +1,5 @@
 import { resolve } from "node:path";
 import { createHash } from "node:crypto";
-import { SQL } from "./queries.ts";
 import { MainDatabase } from "./database.ts";
 import { backup } from "node:sqlite";
 import { MIGRATIONS } from "./schema.ts";
@@ -221,21 +220,35 @@ export async function importDatabase(options: ImportOptions): Promise<Record<str
       captions: "preserved in import_archives only",
     };
     if (tables.includes("ai_media_groups") && tables.includes("ai_media_group_photos")) {
+      const sourceGroups = new Map<string, Row>();
+      for (const row of rows64(source, "ai_media_groups")) {
+        sourceGroups.set(JSON.stringify([String(row.chat_id), String(row.media_group_id)]), row);
+      }
+      const referencedGroups = new Set<string>();
+      const sourcePhotos = Array.from(rows64(source, "ai_media_group_photos"));
+      for (const row of sourcePhotos) {
+        referencedGroups.add(JSON.stringify([String(row.chat_id), String(row.media_group_id)]));
+      }
       target.transaction(() => {
-        for (const row of rows64(source, "ai_media_groups")) {
+        for (const groupKey of referencedGroups) {
+          const [chatId, groupId] = JSON.parse(groupKey) as [string, string];
+          const group = sourceGroups.get(groupKey);
+          if (!group) throw new Error("album file has no source group metadata");
           target!.run(
-            SQL.IndexAlbum,
-            row.chat_id!,
+            "INSERT INTO album_index(chat_id,topic_id,group_id,expires_at,photo_only) VALUES(?,?,?,?,?) ON CONFLICT(chat_id,topic_id,group_id) DO UPDATE SET expires_at=MAX(expires_at,excluded.expires_at),photo_only=MIN(photo_only,excluded.photo_only)",
+            BigInt(chatId),
             -1,
-            row.media_group_id!,
-            row.expires_at!,
-            row.photo_only!,
+            groupId,
+            group.expires_at!,
+            group.photo_only!,
           );
-          albumMapping.groups++;
         }
-        for (const row of rows64(source, "ai_media_group_photos")) {
+        for (const row of sourcePhotos) {
+          const groupKey = JSON.stringify([String(row.chat_id), String(row.media_group_id)]);
+          const group = sourceGroups.get(groupKey);
+          if (!group) throw new Error("album file has no source group metadata");
           target!.run(
-            SQL.IndexAlbumFile,
+            "INSERT INTO album_files(chat_id,topic_id,group_id,msg_id,file_id,file_unique_id,byte_size) VALUES(?,?,?,?,?,?,?) ON CONFLICT(chat_id,topic_id,group_id,msg_id) DO UPDATE SET file_id=excluded.file_id,file_unique_id=excluded.file_unique_id,byte_size=excluded.byte_size",
             row.chat_id!,
             -1,
             row.media_group_id!,
@@ -247,14 +260,18 @@ export async function importDatabase(options: ImportOptions): Promise<Record<str
           albumMapping.files++;
         }
       });
-      for (
-        const [table, sql] of [["ai_media_groups", SQL.ImportedAlbumGroups], [
-          "ai_media_group_photos",
-          SQL.ImportedAlbumFiles,
-        ]]
-      ) {
+      albumMapping.groups = referencedGroups.size;
+      (albumMapping as Record<string, unknown>).orphanGroups = sourceGroups.size -
+        referencedGroups.size;
+      for (const table of ["ai_media_groups", "ai_media_group_photos"]) {
         const mapped = function* (): Iterable<Row> {
-          for (const row of rows64(source, table!)) {
+          for (const row of rows64(source, table)) {
+            if (
+              table === "ai_media_groups" &&
+              !referencedGroups.has(
+                JSON.stringify([String(row.chat_id), String(row.media_group_id)]),
+              )
+            ) continue;
             yield table === "ai_media_groups"
               ? {
                 chat_id: row.chat_id!,
@@ -274,7 +291,11 @@ export async function importDatabase(options: ImportOptions): Promise<Record<str
               };
           }
         };
-        const statement = target.raw.prepare(sql!);
+        const statement = target.raw.prepare(
+          table === "ai_media_groups"
+            ? "SELECT chat_id,topic_id,group_id,expires_at,photo_only FROM album_index WHERE topic_id=-1 ORDER BY chat_id,group_id"
+            : "SELECT chat_id,topic_id,group_id,msg_id,file_id,file_unique_id,byte_size FROM album_files WHERE topic_id=-1 ORDER BY chat_id,msg_id",
+        );
         statement.setReadBigInts(true);
         const expected = digest(mapped()), actual = digest(statement.iterate() as Iterable<Row>);
         if (expected.count !== actual.count || expected.sha256 !== actual.sha256) {

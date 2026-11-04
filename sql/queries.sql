@@ -46,32 +46,21 @@ UPDATE chat_cfg SET auto_cvt_bili=?,auto_calculate=?,auto_exchange=?,auto_check_
 -- name: BackupMedia
 SELECT file_unique_id,file_id,byte_size,mime_type FROM media_objects ORDER BY file_unique_id;
 
--- name: IndexAlbum
-INSERT INTO album_index(chat_id,topic_id,group_id,expires_at,photo_only) VALUES(?,?,?,?,?)
-ON CONFLICT(chat_id,topic_id,group_id) DO UPDATE SET expires_at=MAX(expires_at,excluded.expires_at),photo_only=MIN(photo_only,excluded.photo_only);
-
 -- name: IndexAlbumFile
-INSERT INTO album_files(chat_id,topic_id,group_id,msg_id,file_id,file_unique_id,byte_size) VALUES(?,?,?,?,?,?,?)
-ON CONFLICT(chat_id,topic_id,group_id,msg_id) DO UPDATE SET file_id=excluded.file_id,file_unique_id=excluded.file_unique_id,byte_size=excluded.byte_size;
+INSERT INTO album_files(chat_id,topic_id,group_id,msg_id,file_id,file_unique_id,byte_size,expires_at,photo_only) VALUES(?,?,?,?,?,?,?,?,?)
+ON CONFLICT(chat_id,topic_id,group_id,msg_id) DO UPDATE SET file_id=excluded.file_id,file_unique_id=excluded.file_unique_id,byte_size=excluded.byte_size,expires_at=MAX(expires_at,excluded.expires_at),photo_only=MIN(photo_only,excluded.photo_only);
 
 -- name: GetAlbum
-SELECT topic_id,expires_at,photo_only FROM album_index WHERE chat_id=? AND topic_id IN (?, -1) AND group_id=? ORDER BY topic_id DESC LIMIT 1;
+SELECT topic_id,expires_at,photo_only FROM album_files WHERE chat_id=? AND topic_id IN (?, -1) AND group_id=? ORDER BY topic_id DESC LIMIT 1;
 
 -- name: AlbumFiles
 SELECT msg_id,file_id,file_unique_id,byte_size FROM album_files WHERE chat_id=? AND topic_id=? AND group_id=? ORDER BY msg_id;
 
 -- name: ExpireAlbums
-DELETE FROM album_index WHERE expires_at<=?;
+DELETE FROM album_files WHERE expires_at<=?;
 
 -- name: AlbumForMessage
 SELECT group_id FROM album_files WHERE chat_id=? AND topic_id IN (?, -1) AND msg_id=? ORDER BY topic_id DESC LIMIT 1;
-
--- name: ImportedAlbumGroups
-SELECT chat_id,topic_id,group_id,expires_at,photo_only FROM album_index WHERE topic_id=-1 ORDER BY chat_id,group_id;
-
--- name: ImportedAlbumFiles
-SELECT chat_id,topic_id,group_id,msg_id,file_id,file_unique_id,byte_size FROM album_files WHERE topic_id=-1 ORDER BY chat_id,msg_id;
-
 
 -- name: SessionHasMessage
 SELECT 1 AS found FROM ai_session_messages WHERE session_id=? AND chat_id=? AND msg_id=?;

@@ -313,7 +313,7 @@ Deno.test("ephemeral command IDs never enter facts, sessions, albums or statisti
         "ai_runs",
         "ai_messages",
         "traditional_facts",
-        "album_index",
+        "album_files",
         "chat_stat_daily",
       ]
     ) {

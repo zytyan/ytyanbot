@@ -88,7 +88,7 @@ Deno.test("Go V11 import preserves rows/tokens/payload/media/votes and leaves so
     assertEquals(manifest.tokens, { input: 11, output: 5, cached: 0 });
     const target = new MainDatabase(`${root}/target/dataset/main.db`, { readOnly: true });
     try {
-      assertEquals(target.validate().version, 6);
+      assertEquals(target.validate().version, 7);
       assertEquals((manifest.albumMapping as { groups: number }).groups, 1);
       assertEquals((manifest.albumMapping as { files: number }).files, 1);
       assertEquals(target.get("SELECT topic_id,group_id,file_id FROM album_files"), {
@@ -226,7 +226,7 @@ Deno.test("TS v5 offline conversion archives snapshots and marks hash-only media
     const target = new MainDatabase(`${root}/new/dataset/main.db`, { readOnly: true });
     const archive = new MainDatabase(`${root}/new/dataset/archive/source.db`, { readOnly: true });
     try {
-      assertEquals(target.validate().version, 6);
+      assertEquals(target.validate().version, 7);
       assertEquals(
         archive.get("SELECT payload FROM import_archives WHERE source_table='legacy-only'"),
         { payload: '{"retained":"historical archive"}' },

@@ -6,7 +6,7 @@ import { temporaryDatabase } from "./helpers.ts";
 Deno.test("TS-owned database contains exact migrations and required objects", async () => {
   const temporary = await temporaryDatabase();
   try {
-    assertEquals(temporary.db.validate().version, 6);
+    assertEquals(temporary.db.validate().version, 7);
     assertEquals(
       temporary.db.all<{ version: number; checksum: string }>(
         "SELECT version,checksum FROM ts_schema_versions ORDER BY version",
@@ -22,6 +22,10 @@ Deno.test("TS-owned database contains exact migrations and required objects", as
         1,
       );
     }
+    assertEquals(
+      temporary.db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='album_index'"),
+      undefined,
+    );
   } finally {
     await temporary.close();
   }
@@ -67,6 +71,10 @@ Deno.test("v2 upgrade adds indexed request lookup without rewriting history and 
     temp.db.run(
       "INSERT INTO ai_sessions(chat_id,topic_id,chat_name,chat_type,provider,model,created_at,updated_at) VALUES(-100,0,'test','supergroup','gemini','test',1,1)",
     );
+    temp.db.run("INSERT INTO album_index VALUES(-100,0,'album',9999999999,1)");
+    temp.db.run(
+      "INSERT INTO album_files VALUES(-100,0,'album',7,'file-id','unique-id',123)",
+    );
     const before = temp.db.all<{ id: number; chat_id: number; provider: string; model: string }>(
       "SELECT id,chat_id,provider,model FROM ai_sessions",
     );
@@ -84,7 +92,23 @@ Deno.test("v2 upgrade adds indexed request lookup without rewriting history and 
     temp.db.run("UPDATE ts_schema_versions SET checksum=? WHERE version=1", MIGRATIONS[0].checksum);
     temp.db.upgrade({ offlineArchive: true });
     temp.db.upgrade(); // Re-running an accepted upgrade is harmless.
-    assertEquals(temp.db.validate().version, 6);
+    assertEquals(temp.db.validate().version, 7);
+    assertEquals(
+      temp.db.get(
+        "SELECT chat_id,topic_id,group_id,msg_id,file_id,file_unique_id,byte_size,expires_at,photo_only FROM album_files",
+      ),
+      {
+        chat_id: -100,
+        topic_id: 0,
+        group_id: "album",
+        msg_id: 7,
+        file_id: "file-id",
+        file_unique_id: "unique-id",
+        byte_size: 123,
+        expires_at: 9999999999,
+        photo_only: 1,
+      },
+    );
     assertEquals(
       temp.db.all("SELECT id,chat_id,provider,model FROM ai_sessions"),
       before.map(({ id, chat_id, provider, model }) => ({ id, chat_id, provider, model })),

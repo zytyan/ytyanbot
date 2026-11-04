@@ -1,9 +1,11 @@
+import { SQL } from "../db/queries.ts";
 import type { AppConfig } from "../config.ts";
 import { KeyedMutex } from "../shared/concurrency.ts";
-import type { Clock, MediaStore, TelegramPort } from "../shared/types.ts";
+import type { Clock, MediaObject, MediaStore, TelegramPort } from "../shared/types.ts";
 import { systemClock } from "../shared/types.ts";
 import type { AiRepository, PendingAiMessage, RunRow, StoredAiMessage } from "./repository.ts";
 import type { AiMessage, AiRequest, AiResult, AiSession } from "./types.ts";
+import { linkedGeminiInteraction } from "./messages.ts";
 import { supportsImages } from "./types.ts";
 import { factText, type TraditionalFact } from "../interaction.ts";
 import { logger } from "../logging.ts";
@@ -72,6 +74,12 @@ function topicKey(message: IncomingAiMessage): string {
   return `${message.chatId}:${message.topicId ?? 0}`;
 }
 
+class HistoricalMediaUnavailable extends Error {
+  constructor() {
+    super("历史媒体已离线归档，无法恢复 Telegram 文件标识");
+  }
+}
+
 function storedResult(run: RunRow): AiResult {
   let state = {};
   try {
@@ -89,8 +97,7 @@ function storedResult(run: RunRow): AiResult {
       cachedInputTokens: run.cached_input_tokens ?? 0,
       thinkingTokens: 0,
     },
-    raw: run.raw_payload ?? new Uint8Array(),
-    thoughtSignature: run.thought_signature ?? undefined,
+    raw: new Uint8Array(),
     state,
     inputMessageCount: run.input_message_count ?? 0,
     inputFirstMessageId: run.input_first_msg_id ?? undefined,
@@ -315,13 +322,35 @@ export class AiService {
       result = storedResult(run);
     } else {
       try {
-        const loaded = await latencyStage(
-          "ai.history",
-          () => this.#loadMessages(session.id),
+        const stored = latencySyncStage(
+          "ai.history.sql",
+          () => this.repository.loadMessages(session.id, true),
         );
+        const drop = Math.max(0, Math.ceil((stored.length - 200) / 50) * 50);
+        const history = stored.slice(drop);
+        const state = this.repository.loadProviderState(session.id);
+        const tailStart = history.findLastIndex((item) => item.role === "model") + 1;
+        const linked = linkedGeminiInteraction({
+          provider: session.provider,
+          state,
+          messages: history,
+          historyRebuildLossy: session.historyRebuildLossy,
+        });
+        const window = linked
+          ? [
+            ...history.slice(0, tailStart),
+            ...await this.#loadMedia(history.slice(tailStart), incoming.signal),
+          ]
+          : await this.#loadMedia(history, incoming.signal);
+        let fullHistory: Promise<readonly AiMessage[]> | undefined;
+        const loadHistory = linked
+          ? (signal?: AbortSignal) =>
+            fullHistory ??= latencyStage("ai.history.rebuild", async () => [
+              ...await this.#loadMedia(history.slice(0, tailStart), signal),
+              ...window.slice(tailStart),
+            ])
+          : undefined;
         if (suspended()) return;
-        const drop = Math.max(0, Math.ceil((loaded.length - 200) / 50) * 50);
-        const window = loaded.slice(drop);
         const promptTemplate =
           this.repository.getSystemPrompt(incoming.chatId, incoming.topicId ?? 0) ??
             DEFAULT_SYSTEM_PROMPT;
@@ -337,21 +366,6 @@ export class AiService {
             0,
           ),
         });
-        const snapshot = latencySyncStage("ai.snapshot.json", () =>
-          JSON.stringify({
-            provider: session.provider,
-            model: session.model,
-            systemPrompt: this.#renderPrompt(promptTemplate, incoming),
-            messages: window.map(({ media, ...message }) => ({
-              ...message,
-              media: media.map(({ bytes, ...reference }) => ({
-                ...reference,
-                byteSize: bytes.byteLength,
-              })),
-            })),
-          }, (_key, value) => value instanceof Uint8Array ? { bytes: Array.from(value) } : value));
-        traceMeasurements({ context_snapshot_chars: snapshot.length });
-        this.repository.freezeContext(run.id, snapshot);
         result = await latencyStage("ai.generate", () =>
           this.generate({
             sessionId: session.id,
@@ -360,13 +374,17 @@ export class AiService {
             systemPrompt: this.#renderPrompt(promptTemplate, incoming),
             messages: window,
             // Include stored-only bot inputs when resuming a remote Interactions chain.
-            newMessages: window.slice(window.findLastIndex((item) => item.role === "model") + 1),
+            newMessages: window.slice(tailStart),
+            loadHistory,
             historyRebuildLossy: session.historyRebuildLossy,
-            allowCodeExecution: window.every((item) =>
-              item.media.every((media) => !media.mimeType.startsWith("video/"))
+            allowCodeExecution: history.every((item) =>
+              item.mediaObjects.every((media) =>
+                !media.mimeType?.startsWith("video/") && media.kind !== "video" &&
+                media.kind !== "animation"
+              )
             ),
             explicitCache: this.config().geminiExplicitCache,
-            state: this.repository.loadProviderState(session.id),
+            state,
             signal: incoming.signal,
           }));
         latencySyncStage(
@@ -409,9 +427,15 @@ export class AiService {
           // Best effort.
         }
         if (suspended()) return;
-        await this.telegram.sendMessage(incoming.chatId, "AI 请求失败，请稍后重新发起请求。", {
-          reply_parameters: { message_id: incoming.messageId },
-        });
+        await this.telegram.sendMessage(
+          incoming.chatId,
+          error instanceof HistoricalMediaUnavailable
+            ? error.message
+            : "AI 请求失败，请稍后重新发起请求。",
+          {
+            reply_parameters: { message_id: incoming.messageId },
+          },
+        );
         throw error;
       }
     }
@@ -486,18 +510,15 @@ export class AiService {
         notes.push("[媒体超过 15 MiB 或 240 秒，未上传]");
         continue;
       }
-      const file = await this.telegram.getFile(media.fileId);
-      const timeout = AbortSignal.timeout(10_000);
-      const bytes = await this.telegram.downloadFile(
-        file,
-        input.signal ? AbortSignal.any([input.signal, timeout]) : timeout,
-      );
-      if (bytes.byteLength > 15 * 1024 * 1024) {
-        if (input.completeAlbum) throw new Error("图片组含超限媒体");
-        notes.push("[媒体超过 15 MiB，未上传]");
-        continue;
-      }
-      mediaObjects.push({ ...await this.mediaStore.put(bytes, media.mimeType), kind: media.kind });
+      const reference = {
+        fileUniqueId: media.uniqueId ?? "",
+        fileId: media.fileId,
+        byteSize: media.byteSize ?? 0,
+        mimeType: media.mimeType,
+      };
+      const resolved = await this.#readMedia(reference, input.signal);
+      if (resolved.bytes.byteLength > 15 * 1024 * 1024) throw new Error("媒体超过 15 MiB");
+      mediaObjects.push({ ...resolved.media, kind: media.kind });
     }
     const message: AiMessage = {
       chatId: input.chatId,
@@ -518,28 +539,95 @@ export class AiService {
     return { message, mediaObjects, contextOnly };
   }
 
-  async #loadMessages(sessionId: number): Promise<AiMessage[]> {
-    // A selected reply is part of this session, including every subsequent turn.
-    const all = latencySyncStage(
-      "ai.history.sql",
-      () => this.repository.loadMessages(sessionId, true),
-    );
-    const drop = Math.max(0, Math.ceil((all.length - 200) / 50) * 50);
-    const stored = all.slice(drop);
+  async #loadMedia(stored: readonly StoredAiMessage[], signal?: AbortSignal): Promise<AiMessage[]> {
     return await latencyStage(
       "ai.history.media",
       () =>
         Promise.all(stored.map(async (message: StoredAiMessage): Promise<AiMessage> => ({
           ...message,
           media: await Promise.all(message.mediaObjects.map(async (media) => ({
-            sha256: media.sha256,
+            fileUniqueId: media.fileUniqueId,
             kind: media.kind,
             mimeType: media.mimeType,
-            bytes: await this.mediaStore.open(media.sha256),
+            bytes: media.unavailable
+              ? (() => {
+                throw new HistoricalMediaUnavailable();
+              })()
+              : (await this.#readMedia(media, signal)).bytes,
           }))),
         }))),
     );
   }
+
+  async #readMedia(
+    media: MediaObject,
+    signal?: AbortSignal,
+  ): Promise<{ media: MediaObject; bytes: Uint8Array }> {
+    signal?.throwIfAborted();
+    if (media.fileUniqueId) {
+      try {
+        const bytes = await this.mediaStore.open(media.fileUniqueId);
+        signal?.throwIfAborted();
+        if (
+          bytes.byteLength > 15 * 1024 * 1024 ||
+          (media.byteSize > 0 && bytes.byteLength !== media.byteSize)
+        ) throw new Error("cached media size mismatch");
+        return { media: { ...media, byteSize: bytes.byteLength }, bytes };
+      } catch (error) {
+        if (!(error instanceof Deno.errors.NotFound)) throw error;
+      }
+    }
+    const key = media.fileUniqueId || media.fileId;
+    let download = this.#downloads.get(key);
+    if (!download || download.controller.signal.aborted) {
+      const controller = new AbortController();
+      const downloadSignal = AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]);
+      const pending = (async () => {
+        const file = await waitForMedia(
+          this.telegram.getFile(media.fileId, downloadSignal),
+          downloadSignal,
+        );
+        if (media.fileUniqueId && file.fileUniqueId !== media.fileUniqueId) {
+          throw new Error("Telegram file identity mismatch");
+        }
+        const bytes = await waitForMedia(
+          this.telegram.downloadFile(file, downloadSignal),
+          downloadSignal,
+        );
+        if (bytes.byteLength > 15 * 1024 * 1024) throw new Error("媒体超过 15 MiB");
+        downloadSignal.throwIfAborted();
+        if (!file.fileUniqueId) throw new Error("Telegram file has no unique ID");
+        if (media.byteSize > 0 && bytes.byteLength !== media.byteSize) {
+          throw new Error("downloaded media size mismatch");
+        }
+        const stored = await this.mediaStore.put(bytes, {
+          ...media,
+          fileUniqueId: file.fileUniqueId,
+          fileId: file.fileId,
+          byteSize: bytes.byteLength,
+        });
+        this.repository.db.run(SQL.UpdateMediaFileId, stored.fileId, stored.fileUniqueId);
+        return { media: stored, bytes };
+      })();
+      download = { pending, controller, users: 0 };
+      this.#downloads.set(key, download);
+    }
+    download.users++;
+    try {
+      return await waitForMedia(download.pending, signal);
+    } finally {
+      download.users--;
+      if (!download.users) {
+        download.controller.abort();
+        if (this.#downloads.get(key) === download) this.#downloads.delete(key);
+      }
+    }
+  }
+  readonly #downloads = new Map<string, {
+    pending: Promise<{ media: MediaObject; bytes: Uint8Array }>;
+    controller: AbortController;
+    users: number;
+  }>();
 
   #renderPrompt(template: string, message: IncomingAiMessage): string {
     return template
@@ -548,5 +636,21 @@ export class AiService {
       .replaceAll("%CHAT_ID%", String(message.chatId))
       .replaceAll("%BOT_NAME%", this.botIdentity.firstName)
       .replaceAll("%BOT_USERNAME%", this.botIdentity.username);
+  }
+}
+
+// Cancelling one reply chain must not cancel a download still used by another chain.
+async function waitForMedia<T>(pending: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return await pending;
+  let onAbort: () => void = () => {};
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+  try {
+    return await Promise.race([pending, aborted]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
   }
 }

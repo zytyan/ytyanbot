@@ -13,6 +13,7 @@ import {
 } from "./types.ts";
 import {
   type ApiMode,
+  linkedGeminiInteraction,
   modelMessages,
   replayLegacy,
   savedPayload,
@@ -36,7 +37,7 @@ export function createAiGenerator(
 ) {
   return async (input: AiRequest): Promise<AiResult> => {
     input.signal?.throwIfAborted();
-    const request: AiRequest = {
+    let request: AiRequest = {
       ...input,
       signal: input.signal
         ? AbortSignal.any([input.signal, AbortSignal.timeout(15 * 60_000)])
@@ -312,6 +313,33 @@ export function createAiGenerator(
       );
     }
     if (request.provider === "sub2api") return await call("generateContent");
+    const rebuildInteractions = async (): Promise<AiResult> => {
+      try {
+        return await call("interactions");
+      } catch (error) {
+        if (!compatibleError(error)) throw error;
+        return await call("generateContent");
+      }
+    };
+    const linked = linkedGeminiInteraction(request);
+    if (linked) {
+      try {
+        return await call("interactions", request.newMessages, {}, linked);
+      } catch (error) {
+        if (!compatibleError(error) || attempts >= 5) throw error;
+      }
+      // Resolve the full chain only after the server explicitly rejects continuation.
+      // Loading media is not a generation attempt; its failures must not become text-only replay.
+      if (request.loadHistory) {
+        request = { ...request, messages: await request.loadHistory(request.signal) };
+      }
+      request.signal!.throwIfAborted();
+      return await rebuildInteractions();
+    }
+    // Any non-linked route (including explicit cache) needs complete local history.
+    if (request.loadHistory) {
+      request = { ...request, messages: await request.loadHistory(request.signal) };
+    }
     const cache = await latencyStage("ai.cache", () => explicitCache(request, key, fetcher));
     if (cache) {
       try {
@@ -320,10 +348,6 @@ export function createAiGenerator(
         if (!compatibleError(error)) throw error;
       }
     }
-    const linked = !request.historyRebuildLossy &&
-        request.state.windowStartMessageId === request.messages[0]?.messageId
-      ? request.state.geminiInteractionId
-      : undefined;
     // New cache-enabled sessions use native generation so their signed payload is cacheable.
     // Existing remote Interactions chains retain that protocol and are never cached lossily.
     const interactionHistory = request.messages.some((message) =>
@@ -332,26 +356,11 @@ export function createAiGenerator(
         (savedPayload(message) as { mode?: string }).mode === "interactions")
     );
     if (
-      request.explicitCache && request.model !== MODEL_GEMINI_ARGON && !linked &&
+      request.explicitCache && request.model !== MODEL_GEMINI_ARGON &&
       !interactionHistory
     ) {
       return await call("generateContent");
     }
-    try {
-      try {
-        return await call(
-          "interactions",
-          linked ? request.newMessages : request.messages,
-          {},
-          linked,
-        );
-      } catch (error) {
-        if (!linked || !compatibleError(error)) throw error;
-        return await call("interactions");
-      }
-    } catch (error) {
-      if (!compatibleError(error)) throw error;
-      return await call("generateContent");
-    }
+    return await rebuildInteractions();
   };
 }

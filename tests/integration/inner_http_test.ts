@@ -2,7 +2,7 @@ import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { innerAddress, innerHandler } from "../../src/inner_http.ts";
 import { createBackup } from "../../src/backup.ts";
 import { StatsService } from "../../src/stats/service.ts";
-import { ContentAddressedMediaStore } from "../../src/ai/media_store.ts";
+import { mediaPath, TelegramMediaStore } from "../../src/ai/media_store.ts";
 import { installLogging } from "../../src/logging.ts";
 import { temporaryDatabase } from "./helpers.ts";
 
@@ -115,15 +115,19 @@ Deno.test("inner HTTP authenticates every route and validates counters and log c
 Deno.test("backup uses an independent consistent snapshot and verifies media before archive", async () => {
   const temporary = await temporaryDatabase();
   const mediaRoot = await Deno.makeTempDir();
-  const store = new ContentAddressedMediaStore(mediaRoot);
-  const object = await store.put(new Uint8Array([1, 2, 3]), "image/jpeg");
+  const store = new TelegramMediaStore(mediaRoot);
+  const object = await store.put(new Uint8Array([1, 2, 3]), {
+    fileUniqueId: "file-123",
+    fileId: "download-123",
+    byteSize: 3,
+    mimeType: "image/jpeg",
+  });
   temporary.db.run(
-    "INSERT INTO media_objects VALUES(?,?,?,?,?)",
-    object.sha256,
-    object.relativePath,
+    "INSERT INTO media_objects VALUES(?,?,?,?)",
+    object.fileUniqueId,
+    object.fileId,
     object.byteSize,
     "image/jpeg",
-    1,
   );
   let calls = 0;
   const process = {
@@ -134,7 +138,7 @@ Deno.test("backup uses an independent consistent snapshot and verifies media bef
       assertEquals(manifest.complete_ai_dataset, true);
       assertEquals(manifest.media.object_count, 1);
       assertEquals(
-        await Deno.readFile(`${root}/ai-media/${object.relativePath}`),
+        await Deno.readFile(`${root}/ai-media/${mediaPath(object.fileUniqueId)}`),
         new Uint8Array([1, 2, 3]),
       );
       // A later write never appears in the snapshot chosen for this backup.
@@ -160,7 +164,7 @@ Deno.test("backup uses an independent consistent snapshot and verifies media bef
     );
     assertEquals(calls, 1);
     await result.cleanup();
-    await Deno.writeFile(`${mediaRoot}/${object.relativePath}`, new Uint8Array([4, 5, 6]));
+    await Deno.writeFile(`${mediaRoot}/${mediaPath(object.fileUniqueId)}`, new Uint8Array([4, 5]));
     await assertRejects(() =>
       createBackup(temporary.db, mediaRoot, true, new AbortController().signal, process)
     );
@@ -177,22 +181,37 @@ Deno.test("backup uses an independent consistent snapshot and verifies media bef
 Deno.test("media GC keeps catalogue objects and young files and defaults to dry run", async () => {
   const root = await Deno.makeTempDir();
   try {
-    const store = new ContentAddressedMediaStore(root);
-    const retained = await store.put(new Uint8Array([1]), "image/jpeg");
-    const orphan = await store.put(new Uint8Array([2]), "image/jpeg");
-    await store.put(new Uint8Array([3]), "image/jpeg");
+    const store = new TelegramMediaStore(root);
+    const retained = await store.put(new Uint8Array([1]), {
+      fileUniqueId: "retained",
+      fileId: "r",
+      byteSize: 1,
+      mimeType: "image/jpeg",
+    });
+    const orphan = await store.put(new Uint8Array([2]), {
+      fileUniqueId: "orphan",
+      fileId: "o",
+      byteSize: 1,
+      mimeType: "image/jpeg",
+    });
+    await store.put(new Uint8Array([3]), {
+      fileUniqueId: "young",
+      fileId: "y",
+      byteSize: 1,
+      mimeType: "image/jpeg",
+    });
     const old = new Date(Date.now() - 7200_000);
     for (const object of [retained, orphan]) {
-      await Deno.utime(`${root}/${object.relativePath}`, old, old);
+      await Deno.utime(`${root}/${mediaPath(object.fileUniqueId)}`, old, old);
     }
-    const keep = new Set([retained.sha256]);
-    assertEquals((await store.collectGarbage(keep, 3600_000)).map((row) => row.sha256), [
-      orphan.sha256,
+    const keep = new Set([retained.fileUniqueId]);
+    assertEquals((await store.collectGarbage(keep, 3600_000)).map((row) => row.fileUniqueId), [
+      orphan.fileUniqueId,
     ]);
-    assertEquals(await store.verify(orphan.sha256), true);
+    assertEquals(await store.verify(orphan.fileUniqueId), true);
     await store.collectGarbage(keep, 3600_000, false);
-    assertEquals(await store.verify(orphan.sha256), false);
-    assertEquals(await store.verify(retained.sha256), true);
+    assertEquals(await store.verify(orphan.fileUniqueId), false);
+    assertEquals(await store.verify(retained.fileUniqueId), true);
   } finally {
     await Deno.remove(root, { recursive: true });
   }
@@ -210,9 +229,14 @@ Deno.test("media publication handles partial filesystem writes before rename", a
       }
       return file;
     };
-    const store = new ContentAddressedMediaStore(root), bytes = new Uint8Array([1, 2, 3, 4, 5]);
-    const object = await store.put(bytes, "image/jpeg");
-    assertEquals(await store.open(object.sha256), bytes);
+    const store = new TelegramMediaStore(root), bytes = new Uint8Array([1, 2, 3, 4, 5]);
+    const object = await store.put(bytes, {
+      fileUniqueId: "partial",
+      fileId: "p",
+      byteSize: bytes.length,
+      mimeType: "image/jpeg",
+    });
+    assertEquals(await store.open(object.fileUniqueId), bytes);
   } finally {
     Deno.open = originalOpen;
     await Deno.remove(root, { recursive: true });

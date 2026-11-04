@@ -2,7 +2,7 @@ import { assertEquals, assertRejects } from "@std/assert";
 import { AiRepository } from "../../src/ai/repository.ts";
 import { AiService, type IncomingAiMessage } from "../../src/ai/service.ts";
 import { createAiGenerator } from "../../src/ai/providers.ts";
-import { ContentAddressedMediaStore } from "../../src/ai/media_store.ts";
+import { TelegramMediaStore } from "../../src/ai/media_store.ts";
 import { parseConfig } from "../../src/config.ts";
 import { FakeTelegram, temporaryDatabase } from "./helpers.ts";
 
@@ -23,7 +23,7 @@ Deno.test("media preparation failure never calls a provider or creates a partial
         throw new Error("unexpected model call");
       },
       telegram,
-      new ContentAddressedMediaStore(`${temporary.path}.media`),
+      new TelegramMediaStore(`${temporary.path}.media`),
       () => parseConfig(`database-path: ${temporary.path}\nai-chats: [-100]\n`),
       { id: 99, firstName: "bot", username: "bot" },
     );
@@ -93,7 +93,7 @@ Deno.test("SDK result survives Telegram failure; redelivery neither calls model 
       repository,
       generate,
       telegram,
-      new ContentAddressedMediaStore(`${temporary.path}.media`),
+      new TelegramMediaStore(`${temporary.path}.media`),
       () => config,
       { id: 99, firstName: "bot", username: "bot" },
     );
@@ -121,7 +121,7 @@ Deno.test("SDK result survives Telegram failure; redelivery neither calls model 
     assertEquals(repository.getRun(run!.id)?.assistant_payload_format, "vercel-ai-messages-v1");
     assertEquals(
       temporary.db.get(
-        "SELECT provider,model,total_input_tokens,total_output_tokens,total_cached_input_tokens FROM ai_sessions",
+        "SELECT provider,model,SUM(input_tokens) AS total_input_tokens,SUM(output_tokens) AS total_output_tokens,SUM(cached_input_tokens) AS total_cached_input_tokens FROM ai_runs",
       ),
       {
         provider: "sub2api",
@@ -198,7 +198,7 @@ Deno.test("DeepSeek search-limit response persists original bytes and usage once
       repository,
       generate,
       telegram,
-      new ContentAddressedMediaStore(`${temp.path}.media`),
+      new TelegramMediaStore(`${temp.path}.media`),
       () => config,
       { id: 99, firstName: "bot", username: "bot" },
     );
@@ -216,7 +216,7 @@ Deno.test("DeepSeek search-limit response persists original bytes and usage once
     await assertRejects(() => service.handle(message), Error, "Telegram unavailable");
     const failed = repository.runForRequest(-100, 10)!;
     assertEquals(failed.status, "delivery_failed");
-    assertEquals(new TextDecoder().decode(failed.raw_payload!), wire);
+    assertEquals(failed.assistant_payload_format, "vercel-ai-messages-v1");
     assertEquals(failed.response_text, "Answer from completed searches.");
     telegram.sendRichMessage = send;
     await service.handle(message);
@@ -225,7 +225,7 @@ Deno.test("DeepSeek search-limit response persists original bytes and usage once
     assertEquals(repository.runForRequest(-100, 10)!.status, "delivered");
     assertEquals(
       temp.db.get(
-        "SELECT total_input_tokens,total_output_tokens,total_cached_input_tokens FROM ai_sessions",
+        "SELECT SUM(input_tokens) AS total_input_tokens,SUM(output_tokens) AS total_output_tokens,SUM(cached_input_tokens) AS total_cached_input_tokens FROM ai_runs",
       ),
       { total_input_tokens: 24, total_output_tokens: 6, total_cached_input_tokens: 4 },
     );

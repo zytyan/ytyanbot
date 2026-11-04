@@ -153,7 +153,7 @@ Deno.test("suspension suppresses in-flight and queued replies while retaining su
     assertEquals(repository.runForRequest(-100, 2), undefined);
     const run = repository.runForRequest(-100, 1)!;
     assertEquals(run.status, "generated");
-    assertEquals(run.raw_payload, result.raw);
+    assertEquals(run.assistant_payload, result.assistantPayload);
     assertEquals(run.assistant_payload, result.assistantPayload);
     assertEquals(run.output_tokens, 2);
     // An explicit later redelivery uses the saved response and never calls the model again.
@@ -162,7 +162,7 @@ Deno.test("suspension suppresses in-flight and queued replies while retaining su
     assertEquals(repository.runForRequest(-100, 1)!.status, "delivered");
     assertEquals(
       temp.db.get<{ total_output_tokens: number }>(
-        "SELECT total_output_tokens FROM ai_sessions WHERE id=?",
+        "SELECT COALESCE(SUM(output_tokens),0) AS total_output_tokens FROM ai_runs WHERE session_id=?",
         id,
       )!.total_output_tokens,
       2,

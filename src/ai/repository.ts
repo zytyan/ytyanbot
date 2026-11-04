@@ -26,8 +26,6 @@ export interface RunRow {
   provider: AiProviderName;
   model: string;
   response_text: string | null;
-  raw_payload: Uint8Array | null;
-  thought_signature: string | null;
   assistant_payload: Uint8Array | null;
   assistant_payload_format: string | null;
   candidate_state_json: string | null;
@@ -47,7 +45,7 @@ export interface PendingAiMessage {
 
 export interface StoredAiMessage extends AiMessage {
   readonly contextOnly: boolean;
-  readonly mediaObjects: readonly { sha256: string; mimeType: string; kind: string }[];
+  readonly mediaObjects: readonly (MediaObject & { kind: string; unavailable: boolean })[];
 }
 
 export interface AiChatSelection {
@@ -90,10 +88,6 @@ export class AiRepository {
 
   runForRequest(chatId: number, messageId: number): RunRow | undefined {
     return this.db.get<RunRow>(SQL.RunForRequest, chatId, messageId);
-  }
-
-  freezeContext(runId: number, snapshot: string): void {
-    this.db.run(SQL.FreezeRunContext, runId, snapshot);
   }
 
   getSelection(chatId: number): AiChatSelection {
@@ -235,13 +229,16 @@ WHERE sm.session_id=? AND (sm.context_only=0 OR ?=1) ORDER BY sm.position`,
     return rows.map((row) => {
       const chatId = Number(row.chat_id);
       const messageId = Number(row.msg_id);
-      const media = this.db.all<{ sha256: string; mime_type: string; media_kind: string }>(
-        `SELECT o.sha256,o.mime_type,mm.media_kind
-FROM ai_message_media mm JOIN media_objects o ON o.sha256=mm.media_sha256
-WHERE mm.chat_id=? AND mm.msg_id=? ORDER BY mm.ordinal`,
-        chatId,
-        messageId,
-      );
+      const media = this.db.all<
+        {
+          file_unique_id: string;
+          file_id: string;
+          byte_size: number;
+          mime_type: string;
+          media_kind: string;
+          unavailable: number;
+        }
+      >(SQL.MessageMedia, chatId, messageId);
       return {
         contextOnly: Number(row.context_only) === 1,
         chatId,
@@ -263,7 +260,10 @@ WHERE mm.chat_id=? AND mm.msg_id=? ORDER BY mm.ordinal`,
           ? undefined
           : String(row.assistant_payload_format),
         mediaObjects: media.map((item) => ({
-          sha256: item.sha256,
+          fileUniqueId: item.file_unique_id,
+          fileId: item.file_id,
+          byteSize: item.byte_size,
+          unavailable: item.unavailable === 1,
           mimeType: item.mime_type,
           kind: item.media_kind,
         })),
@@ -334,21 +334,18 @@ VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(chat_id,msg_id) DO NOTHING`,
       for (let ordinal = 0; ordinal < pending.mediaObjects.length; ordinal++) {
         const media = pending.mediaObjects[ordinal]!;
         this.db.run(
-          `INSERT INTO media_objects(sha256,relative_path,byte_size,mime_type,created_at)
-VALUES(?,?,?,?,?) ON CONFLICT(sha256) DO NOTHING`,
-          media.sha256,
-          media.relativePath,
+          SQL.SaveMedia,
+          media.fileUniqueId,
+          media.fileId,
           media.byteSize,
           media.mimeType,
-          now,
         );
         this.db.run(
-          `INSERT INTO ai_message_media(chat_id,msg_id,ordinal,media_sha256,media_kind)
-VALUES(?,?,?,?,?) ON CONFLICT(chat_id,msg_id,ordinal) DO NOTHING`,
+          SQL.SaveMessageMedia,
           message.chatId,
           message.messageId,
           ordinal,
-          media.sha256,
+          media.fileUniqueId,
           media.kind,
         );
       }
@@ -408,8 +405,8 @@ VALUES(?,?,?,'pending',?,?,?) ON CONFLICT(session_id,request_chat_id,request_msg
       const stateJson = JSON.stringify(result.state);
       const updated = this.db.raw.prepare(`UPDATE ai_runs SET status='generated',completed_at=?,
 input_tokens=?,output_tokens=?,cached_input_tokens=?,input_message_count=?,input_first_msg_id=?,input_last_msg_id=?,
-response_text=?,raw_payload=?,thought_signature=?,assistant_payload=?,assistant_payload_format=?,
-cache_expire_at=?,candidate_state_json=?,error_code=NULL,error_message=NULL
+response_text=?,assistant_payload=?,assistant_payload_format=?,
+candidate_state_json=?,error_code=NULL,error_message=NULL
 WHERE id=? AND status='pending'`).run(
         now,
         result.usage.inputTokens,
@@ -419,22 +416,15 @@ WHERE id=? AND status='pending'`).run(
         result.inputFirstMessageId ?? null,
         result.inputLastMessageId ?? null,
         result.displayText || null,
-        result.raw,
-        result.thoughtSignature ?? null,
         result.assistantPayload,
         result.assistantPayloadFormat,
-        result.state.geminiCacheExpireTime ?? null,
         stateJson,
         runId,
       );
       if (Number(updated.changes) === 1) {
         const run = this.getRun(runId)!;
         this.db.run(
-          `UPDATE ai_sessions SET total_input_tokens=total_input_tokens+?,
-total_output_tokens=total_output_tokens+?,total_cached_input_tokens=total_cached_input_tokens+?,updated_at=? WHERE id=?`,
-          result.usage.inputTokens,
-          result.usage.outputTokens,
-          result.usage.cachedInputTokens,
+          `UPDATE ai_sessions SET updated_at=? WHERE id=?`,
           now,
           run.session_id,
         );
@@ -497,7 +487,7 @@ VALUES(?,?,?,?,?,'',0) ON CONFLICT(session_id,chat_id,msg_id) DO NOTHING`,
         "model",
       );
       const delivered = this.db.raw.prepare(
-        `UPDATE ai_runs SET status='delivered',response_chat_id=?,response_msg_id=?,
+        `UPDATE ai_runs SET status='delivered',response_chat_id=?,response_msg_id=?,response_text=NULL,
 error_code=NULL,error_message=NULL WHERE id=? AND status IN ('generated','delivery_failed')`,
       ).run(
         response.chatId,

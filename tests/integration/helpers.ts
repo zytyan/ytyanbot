@@ -96,9 +96,9 @@ export class FakeTelegram implements TelegramPort {
     return Promise.resolve();
   }
   getFile(fileId: string): Promise<TelegramFile> {
-    return Promise.resolve({ fileId, filePath: fileId });
+    return Promise.resolve({ fileId, fileUniqueId: `unique-${fileId}`, filePath: fileId });
   }
-  downloadFile(): Promise<Uint8Array> {
+  downloadFile(_file: TelegramFile, _signal?: AbortSignal): Promise<Uint8Array> {
     return Promise.resolve(this.fileBytes);
   }
 }

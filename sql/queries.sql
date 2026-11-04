@@ -3,7 +3,7 @@ SELECT reactions_enabled FROM ai_user_settings WHERE user_id=?;
 
 -- name: UsageForResponse
 SELECT session_id,provider,model,input_tokens,output_tokens,cached_input_tokens,
-input_message_count,input_first_msg_id,input_last_msg_id,cache_expire_at,raw_payload
+input_message_count,input_first_msg_id,input_last_msg_id,json_extract(candidate_state_json,'$.geminiCacheExpireTime') AS cache_expire_at
 FROM ai_runs WHERE response_chat_id=? AND response_msg_id=? AND status='delivered';
 
 -- name: SetReactions
@@ -21,12 +21,6 @@ VALUES(?,?,?,?,?,?,?,?,?);
 -- name: ReplyFacts
 SELECT feature,request_msg_id,reply_msg_id,status,context_text,created_at FROM traditional_facts
 WHERE chat_id=? AND topic_id=? AND reply_msg_id=? AND delivery_status='delivered' ORDER BY id;
-
--- name: FreezeRunContext
-INSERT INTO ai_run_context(run_id,snapshot) VALUES(?,?) ON CONFLICT(run_id) DO NOTHING;
-
--- name: GetRunContext
-SELECT snapshot FROM ai_run_context WHERE run_id=?;
 
 -- name: RequestFacts
 SELECT feature,request_msg_id,reply_msg_id,status,context_text,created_at FROM traditional_facts
@@ -50,7 +44,7 @@ VALUES(?,0,0,0,0,0,0,?) ON CONFLICT(id) DO NOTHING;
 UPDATE chat_cfg SET auto_cvt_bili=?,auto_calculate=?,auto_exchange=?,auto_check_adult=?,resp_nsfw_msg=? WHERE id=?;
 
 -- name: BackupMedia
-SELECT sha256,relative_path,byte_size,mime_type FROM media_objects ORDER BY sha256;
+SELECT file_unique_id,file_id,byte_size,mime_type FROM media_objects ORDER BY file_unique_id;
 
 -- name: IndexAlbum
 INSERT INTO album_index(chat_id,topic_id,group_id,expires_at,photo_only) VALUES(?,?,?,?,?)
@@ -102,3 +96,27 @@ INSERT INTO ai_session_request_origins(session_id,chat_id,msg_id,bot_streak,supp
 
 -- name: IsLoopSuppressedRequest
 SELECT 1 AS found FROM ai_session_request_origins WHERE chat_id=? AND msg_id=? AND suppressed=1 LIMIT 1;
+
+-- name: SaveMedia
+INSERT INTO media_objects(file_unique_id,file_id,byte_size,mime_type) VALUES(?,?,?,?)
+ON CONFLICT(file_unique_id) DO UPDATE SET file_id=excluded.file_id;
+
+-- name: SaveMessageMedia
+INSERT INTO ai_message_media(chat_id,msg_id,ordinal,file_unique_id,media_kind) VALUES(?,?,?,?,?)
+ON CONFLICT(chat_id,msg_id,ordinal) DO NOTHING;
+
+-- name: MessageMedia
+SELECT o.file_unique_id,o.file_id,o.byte_size,o.mime_type,mm.media_kind,mm.unavailable
+FROM ai_message_media mm LEFT JOIN media_objects o USING(file_unique_id)
+WHERE mm.chat_id=? AND mm.msg_id=? ORDER BY mm.ordinal;
+
+-- name: UpdateMediaFileId
+UPDATE media_objects SET file_id=? WHERE file_unique_id=?;
+
+-- name: SessionUsage
+SELECT COALESCE(SUM(input_tokens),0) AS total_input_tokens,
+COALESCE(SUM(output_tokens),0) AS total_output_tokens,
+COALESCE(SUM(cached_input_tokens),0) AS total_cached_input_tokens FROM ai_runs WHERE session_id=?;
+
+-- name: UnavailableMediaCount
+SELECT COUNT(*) AS count FROM ai_message_media WHERE unavailable=1;

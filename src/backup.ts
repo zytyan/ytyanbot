@@ -1,6 +1,7 @@
 import { backup } from "node:sqlite";
 import { createHash } from "node:crypto";
 import { MainDatabase } from "./db/database.ts";
+import { mediaPath } from "./ai/media_store.ts";
 import { SQL } from "./db/queries.ts";
 import { DenoProcessRunner } from "./shared/process.ts";
 import type { ProcessRunner } from "./shared/types.ts";
@@ -23,35 +24,40 @@ export async function createBackup(
     });
     const snapshot = new MainDatabase(`${root}/main.db`, { readOnly: true });
     const inventory = [];
+    const missing: string[] = [];
+    let unavailable = 0;
     try {
       snapshot.validate();
+      unavailable = snapshot.get<{ count: number }>(SQL.UnavailableMediaCount)!.count;
       if (includeMedia) {
         await Deno.mkdir(`${root}/ai-media`);
         for (
           const row of snapshot.all<
-            { sha256: string; relative_path: string; byte_size: number; mime_type: string }
+            { file_unique_id: string; file_id: string; byte_size: number; mime_type: string }
           >(SQL.BackupMedia)
         ) {
           signal.throwIfAborted();
-          const expected = `sha256/${row.sha256.slice(0, 2)}/${row.sha256}`;
-          if (!/^[0-9a-f]{64}$/.test(row.sha256) || row.relative_path !== expected) {
-            throw new Error("invalid backup media path");
-          }
+          const expected = mediaPath(row.file_unique_id);
           const source = `${mediaRoot}/${expected}`;
-          const stat = await Deno.lstat(source);
+          let stat: Deno.FileInfo;
+          try {
+            stat = await Deno.lstat(source);
+          } catch (error) {
+            if (!(error instanceof Deno.errors.NotFound)) throw error;
+            missing.push(row.file_unique_id);
+            continue;
+          }
           if (!stat.isFile || stat.size !== row.byte_size) {
             throw new Error("backup media size mismatch");
           }
           const target = `${root}/ai-media/${expected}`;
           await Deno.mkdir(target.slice(0, target.lastIndexOf("/")), { recursive: true });
-          const hash = createHash("sha256");
           const input = await Deno.open(source, { read: true });
           const output = await Deno.open(target, { createNew: true, write: true, mode: 0o600 });
           let size = 0;
           try {
             for await (const chunk of input.readable) {
               signal.throwIfAborted();
-              hash.update(chunk);
               size += chunk.length;
               let position = 0;
               while (position < chunk.length) {
@@ -64,8 +70,8 @@ export async function createBackup(
             } catch { /* readable closes itself */ }
             output.close();
           }
-          if (size !== row.byte_size || hash.digest("hex") !== row.sha256) {
-            throw new Error("backup media hash mismatch");
+          if (size !== row.byte_size) {
+            throw new Error("backup media size mismatch");
           }
           inventory.push(row);
         }
@@ -74,22 +80,26 @@ export async function createBackup(
       snapshot.close();
     }
     const list = inventory.map((row) =>
-      `${row.sha256}\t${row.byte_size}\t${row.mime_type}\t${row.relative_path}\n`
+      `${row.file_unique_id}\t${row.byte_size}\t${row.mime_type}\t${
+        mediaPath(row.file_unique_id)
+      }\n`
     ).join("");
     if (includeMedia) await Deno.writeTextFile(`${root}/media-manifest.tsv`, list);
     await Deno.writeTextFile(
       `${root}/manifest.json`,
       JSON.stringify({
-        schema: "ytyan-ts-backup-v1",
+        schema: "ytyan-ts-backup-v2",
         timestamp: new Date().toISOString(),
         databases: [{
           name: "main",
           path: "main.db",
           size: (await Deno.stat(`${root}/main.db`)).size,
         }],
-        complete_ai_dataset: includeMedia,
+        complete_ai_dataset: includeMedia && !missing.length && !unavailable,
         media: {
           included: includeMedia,
+          missing_cache_file_unique_ids: missing,
+          unavailable_legacy_references: unavailable,
           object_count: inventory.length,
           total_bytes: inventory.reduce((sum, row) => sum + row.byte_size, 0),
           list_sha256: includeMedia ? createHash("sha256").update(list).digest("hex") : undefined,

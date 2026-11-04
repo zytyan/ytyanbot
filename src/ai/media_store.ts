@@ -1,112 +1,96 @@
 import type { MediaObject, MediaStore } from "../shared/types.ts";
 
-function hex(bytes: Uint8Array): string {
-  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+// Telegram identifiers are opaque. Hex encoding is reversible and path-safe; no content hashing.
+export function mediaPath(fileUniqueId: string): string {
+  if (!fileUniqueId || new TextEncoder().encode(fileUniqueId).length > 120) {
+    throw new Error("invalid Telegram file unique ID");
+  }
+  const key = Array.from(
+    new TextEncoder().encode(fileUniqueId),
+    (b) => b.toString(16).padStart(2, "0"),
+  ).join("");
+  return `telegram/${key}`;
 }
 
-async function sha256(bytes: Uint8Array): Promise<string> {
-  const stable = Uint8Array.from(bytes);
-  return hex(new Uint8Array(await crypto.subtle.digest("SHA-256", stable.buffer)));
-}
-
-export class ContentAddressedMediaStore implements MediaStore {
+export class TelegramMediaStore implements MediaStore {
   constructor(readonly root: string) {}
 
-  async put(bytes: Uint8Array, mimeType: string): Promise<MediaObject> {
-    const hash = await sha256(bytes);
-    const relativePath = `sha256/${hash.slice(0, 2)}/${hash}`;
-    const path = `${this.root}/${relativePath}`;
-    await Deno.mkdir(path.slice(0, path.lastIndexOf("/")), { recursive: true });
+  async put(bytes: Uint8Array, media: MediaObject): Promise<MediaObject> {
+    const path = `${this.root}/${mediaPath(media.fileUniqueId)}`;
+    if (bytes.byteLength !== media.byteSize) throw new Error("media size mismatch");
+    await Deno.mkdir(`${this.root}/telegram`, { recursive: true });
+    const temp = await Deno.makeTempFile({ dir: `${this.root}/telegram`, prefix: ".tmp-" });
     try {
-      const existing = await Deno.readFile(path);
-      if (existing.byteLength !== bytes.byteLength || await sha256(existing) !== hash) {
-        throw new Error(`media object is corrupt: ${hash}`);
-      }
-    } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) throw error;
-      const temp = await Deno.makeTempFile({
-        dir: path.slice(0, path.lastIndexOf("/")),
-        prefix: ".tmp-",
-      });
+      const file = await Deno.open(temp, { write: true, truncate: true });
       try {
-        const file = await Deno.open(temp, { write: true, truncate: true });
-        try {
-          let offset = 0;
-          while (offset < bytes.length) {
-            const written = await file.write(bytes.subarray(offset));
-            if (!written) throw new Error("media write made no progress");
-            offset += written;
-          }
-          await file.sync();
-        } finally {
-          file.close();
+        let offset = 0;
+        while (offset < bytes.length) {
+          const written = await file.write(bytes.subarray(offset));
+          if (!written) throw new Error("media write made no progress");
+          offset += written;
         }
-        await Deno.rename(temp, path);
-      } catch (error) {
-        try {
-          await Deno.remove(temp);
-        } catch {
-          // Best-effort cleanup.
-        }
-        throw error;
+        await file.sync();
+      } finally {
+        file.close();
       }
+      await Deno.rename(temp, path);
+    } catch (error) {
+      try {
+        await Deno.remove(temp);
+      } catch { /* Best-effort cleanup preserves the original error. */ }
+      throw error;
     }
-    return { sha256: hash, relativePath, byteSize: bytes.byteLength, mimeType };
+    return media;
   }
 
-  async open(hash: string): Promise<Uint8Array> {
-    this.#validateHash(hash);
-    const bytes = await Deno.readFile(`${this.root}/sha256/${hash.slice(0, 2)}/${hash}`);
-    if (await sha256(bytes) !== hash) throw new Error(`media object is corrupt: ${hash}`);
-    return bytes;
+  open(fileUniqueId: string): Promise<Uint8Array> {
+    return Deno.readFile(`${this.root}/${mediaPath(fileUniqueId)}`);
   }
 
-  async verify(hash: string): Promise<boolean> {
+  async verify(fileUniqueId: string): Promise<boolean> {
     try {
-      await this.open(hash);
+      await this.open(fileUniqueId);
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) return false;
+      throw error;
     }
   }
 
-  // Invoke while the runtime is stopped. Catalogued objects are retained even
-  // when no current message references them; this does not define history retention.
+  // Offline only; catalogued objects are retained, regardless of message references.
   async collectGarbage(
     retained: ReadonlySet<string>,
     graceMs: number,
     dryRun = true,
     now = Date.now(),
-  ): Promise<Array<{ sha256: string; byteSize: number }>> {
+  ): Promise<Array<{ fileUniqueId: string; byteSize: number }>> {
     if (!Number.isFinite(graceMs) || graceMs <= 0) {
       throw new Error("positive media GC grace required");
     }
-    const removed: Array<{ sha256: string; byteSize: number }> = [];
-    let directories: Deno.DirEntry[];
+    const keep = new Set(Array.from(retained, mediaPath));
+    const removed = [];
+    let entries: Deno.DirEntry[];
     try {
-      directories = await Array.fromAsync(Deno.readDir(`${this.root}/sha256`));
+      entries = await Array.fromAsync(Deno.readDir(`${this.root}/telegram`));
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) return removed;
+      if (error instanceof Deno.errors.NotFound) return [];
       throw error;
     }
-    for (const directory of directories) {
-      if (!directory.isDirectory || !/^[0-9a-f]{2}$/.test(directory.name)) continue;
-      for await (const entry of Deno.readDir(`${this.root}/sha256/${directory.name}`)) {
-        if (
-          !entry.isFile || !/^[0-9a-f]{64}$/.test(entry.name) ||
-          !entry.name.startsWith(directory.name) || retained.has(entry.name)
-        ) continue;
-        const path = `${this.root}/sha256/${directory.name}/${entry.name}`;
-        const stat = await Deno.lstat(path);
-        if (!stat.isFile || !stat.mtime || now - stat.mtime.getTime() < graceMs) continue;
-        removed.push({ sha256: entry.name, byteSize: stat.size });
-        if (!dryRun) await Deno.remove(path);
-      }
+    for (const entry of entries) {
+      if (
+        !entry.isFile || !/^(?:[0-9a-f]{2})+$/.test(entry.name) ||
+        keep.has(`telegram/${entry.name}`)
+      ) continue;
+      const path = `${this.root}/telegram/${entry.name}`;
+      const stat = await Deno.lstat(path);
+      if (!stat.isFile || !stat.mtime || now - stat.mtime.getTime() < graceMs) continue;
+      const fileUniqueId = new TextDecoder("utf-8", { fatal: true }).decode(
+        Uint8Array.from(entry.name.match(/../g)!, (b) => parseInt(b, 16)),
+      );
+      if (mediaPath(fileUniqueId) !== `telegram/${entry.name}`) continue;
+      removed.push({ fileUniqueId, byteSize: stat.size });
+      if (!dryRun) await Deno.remove(path);
     }
     return removed;
-  }
-
-  #validateHash(hash: string): void {
-    if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error("invalid media hash");
   }
 }

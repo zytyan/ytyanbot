@@ -17,7 +17,7 @@ export type AiProviderName = "gemini" | "sub2api" | "deepseek";
 export type AiRole = "user" | "model" | "system";
 
 export interface AiMedia {
-  readonly sha256?: string;
+  readonly fileUniqueId?: string;
   readonly kind: string;
   readonly mimeType: string;
   readonly bytes: Uint8Array;
@@ -65,6 +65,8 @@ export interface AiRequest {
   readonly systemPrompt: string;
   readonly messages: readonly AiMessage[];
   readonly newMessages: readonly AiMessage[];
+  // Present only when older media was deferred for a linked remote conversation.
+  readonly loadHistory?: (signal?: AbortSignal) => Promise<readonly AiMessage[]>;
   readonly historyRebuildLossy: boolean;
   readonly allowCodeExecution: boolean;
   readonly explicitCache: boolean;

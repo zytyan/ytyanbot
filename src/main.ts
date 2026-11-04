@@ -1,4 +1,4 @@
-import { ContentAddressedMediaStore } from "./ai/media_store.ts";
+import { TelegramMediaStore } from "./ai/media_store.ts";
 import { createApplication } from "./app.ts";
 import { configPath, ConfigStore, loadConfig } from "./config.ts";
 import { MainDatabase } from "./db/database.ts";
@@ -46,11 +46,13 @@ async function checkDatabase(path: string, mediaPath?: string): Promise<void> {
     const result = db.validate();
     let missingMedia = 0;
     if (mediaPath) {
-      const store = new ContentAddressedMediaStore(mediaPath);
+      const store = new TelegramMediaStore(mediaPath);
       for (
-        const row of db.all<{ sha256: string }>("SELECT sha256 FROM media_objects ORDER BY sha256")
+        const row of db.all<{ file_unique_id: string }>(
+          "SELECT file_unique_id FROM media_objects ORDER BY file_unique_id",
+        )
       ) {
-        if (!await store.verify(row.sha256)) missingMedia++;
+        if (!await store.verify(row.file_unique_id)) missingMedia++;
       }
     }
     const output = { database: path, ...result, mediaChecked: Boolean(mediaPath), missingMedia };
@@ -152,10 +154,10 @@ async function main(): Promise<void> {
     try {
       db.validate();
       const retained = new Set(
-        db.all<{ sha256: string }>(SQL.BackupMedia).map((row) => row.sha256),
+        db.all<{ file_unique_id: string }>(SQL.BackupMedia).map((row) => row.file_unique_id),
       );
       const dryRun = !Deno.args.includes("--apply");
-      const objects = await new ContentAddressedMediaStore(media).collectGarbage(
+      const objects = await new TelegramMediaStore(media).collectGarbage(
         retained,
         grace * 3600_000,
         dryRun,

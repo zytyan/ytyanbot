@@ -113,7 +113,8 @@ HEAD。
 - 三通道及 provider/model 联合选择已接通；回调 aimodel2 使用稳定选项索引避免 Telegram 64-byte
   限制，旧模型菜单明确提示重新打开。Sub2API 映射 tiered，只走原生路径。
 - 新 assistant 保存 vercel-ai-messages-v1：provider、mode、SDK response.messages 与 native payload；
-  raw_payload 保存克隆 HTTP 响应原字节。旧原生 content/steps/DeepSeek message 在相同协议下精确重放；
+  TS V6 不再额外持久化 raw_payload 原始 HTTP 副本；保留必要的回放 payload。旧原生
+  content/steps/DeepSeek message 在相同协议下精确重放；
   明确的供应商/模型切换依旧使用可移植历史重建。无需新建 transport/legacy provider 类。
 - 新官方 Gemini 会话开启缓存时使用原生生成；已存在 Interactions 历史继续原协议。 Interactions opaque
   steps 不被压成显示文字创建缓存。生成与缓存只在 AI 执行入口调用，

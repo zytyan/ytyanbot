@@ -43,9 +43,8 @@ Deno.test("Go-compatible bot replies trigger AI after traditional commands; fact
       true,
     );
     assertEquals(
-      temporary.db.get<{ count: number }>("SELECT COUNT(*) AS count FROM ai_run_context")!.count >
-        0,
-      true,
+      temporary.db.get("SELECT name FROM sqlite_master WHERE name='ai_run_context'"),
+      undefined,
     );
     return Promise.resolve(
       Response.json({
@@ -77,7 +76,11 @@ Deno.test("Go-compatible bot replies trigger AI after traditional commands; fact
             };
           } else if (method === "getFile") {
             const id = (payload as { file_id: string }).file_id;
-            result = { file_id: id, file_unique_id: id, file_path: `photos/${id}` };
+            result = {
+              file_id: id,
+              file_unique_id: id.replace("photo-", "uid-"),
+              file_path: `photos/${id}`,
+            };
           } else if (method === "sendMessage") {
             const message = {
               message_id: nextId++,
@@ -166,7 +169,7 @@ Deno.test("Go-compatible bot replies trigger AI after traditional commands; fact
       update(903, "@test_bot inspect all", { ...ordinary, media_group_id: undefined }),
     );
     assertEquals(modelCalls, 6);
-    assertEquals(fileDownloads, 6);
+    assertEquals(fileDownloads, 3); // Reuses the Telegram identity cache.
     const ordinaryAnswer = sent.at(-1)!;
     const latestSession = () =>
       temporary.db.get<{ session_id: number }>(
@@ -212,7 +215,7 @@ Deno.test("Go-compatible bot replies trigger AI after traditional commands; fact
     assertEquals(modelCalls, 15);
     const probe = latencySnapshot().recent.find((r) => r.update_id === 913)!;
     assertEquals(probe.measurements.history_messages! >= 4, true);
-    assertEquals(probe.measurements.context_snapshot_chars! > 0, true);
+    assertEquals(probe.measurements.context_snapshot_chars, undefined);
     assertEquals(probe.measurements.request_body_chars! > 0, true);
     assertEquals(probe.measurements.response_body_bytes! > 0, true);
     assertEquals(probe.measurements.assistant_payload_bytes! > 0, true);
@@ -220,7 +223,6 @@ Deno.test("Go-compatible bot replies trigger AI after traditional commands; fact
       const stage of [
         "ai.history.sql",
         "ai.history.media",
-        "ai.snapshot.json",
         "provider.request.parse",
         "provider.request.stringify",
         "provider.history.replay",

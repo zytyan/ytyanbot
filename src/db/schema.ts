@@ -5,6 +5,7 @@ export const CANONICAL_SCHEMA = [
   "-- Incoming-message deduplication runs before reaction and must not scan payload-bearing rows.\nCREATE INDEX idx_ai_runs_request ON ai_runs(request_chat_id,request_msg_id,id DESC);\n",
   "-- NULL means permanent suspension; deleting the row resumes the session.\nCREATE TABLE ai_session_suspensions (\n  session_id INTEGER PRIMARY KEY REFERENCES ai_sessions(id),\n  until_at INTEGER CHECK(until_at IS NULL OR until_at > 0)\n);\n",
   "-- Only explicitly triggered session submissions are counted, never ordinary chat history.\nCREATE TABLE ai_session_request_origins (\n  id INTEGER PRIMARY KEY,\n  session_id INTEGER NOT NULL REFERENCES ai_sessions(id),\n  chat_id INTEGER NOT NULL,\n  msg_id INTEGER NOT NULL,\n  bot_streak INTEGER NOT NULL CHECK(bot_streak BETWEEN 0 AND 3),\n  suppressed INTEGER NOT NULL CHECK(suppressed IN (0,1)),\n  UNIQUE(session_id,chat_id,msg_id),\n  FOREIGN KEY(chat_id,msg_id) REFERENCES ai_messages(chat_id,msg_id)\n);\nCREATE INDEX idx_ai_session_request_origins_latest ON ai_session_request_origins(session_id,id DESC);\nCREATE INDEX idx_ai_session_request_origins_suppressed ON ai_session_request_origins(chat_id,msg_id) WHERE suppressed=1;\n",
+  "-- Populated pre-v6 databases must be converted offline with db-import.\n-- The offline source snapshot and media archive retain omitted historical data.\nDROP TABLE ai_run_context;\nDROP TABLE import_archives;\nALTER TABLE ai_runs DROP COLUMN raw_payload;\nALTER TABLE ai_runs DROP COLUMN thought_signature;\nALTER TABLE ai_runs DROP COLUMN cache_expire_at;\nALTER TABLE ai_sessions DROP COLUMN total_input_tokens;\nALTER TABLE ai_sessions DROP COLUMN total_output_tokens;\nALTER TABLE ai_sessions DROP COLUMN total_cached_input_tokens;\nDROP TABLE ai_message_media;\nDROP TABLE media_objects;\nCREATE TABLE media_objects (\n file_unique_id TEXT PRIMARY KEY CHECK(length(file_unique_id)>0),\n file_id TEXT NOT NULL CHECK(length(file_id)>0),\n byte_size INTEGER NOT NULL CHECK(byte_size>=0),\n mime_type TEXT NOT NULL CHECK(length(mime_type)>0)\n) WITHOUT ROWID, STRICT;\nCREATE TABLE ai_message_media (\n chat_id INTEGER NOT NULL, msg_id INTEGER NOT NULL,\n ordinal INTEGER NOT NULL CHECK(ordinal>=0),\n file_unique_id TEXT REFERENCES media_objects(file_unique_id),\n media_kind TEXT NOT NULL,\n unavailable INTEGER NOT NULL DEFAULT 0 CHECK(unavailable IN (0,1)),\n CHECK((file_unique_id IS NULL) = (unavailable=1)),\n PRIMARY KEY(chat_id,msg_id,ordinal),\n FOREIGN KEY(chat_id,msg_id) REFERENCES ai_messages(chat_id,msg_id)\n) WITHOUT ROWID, STRICT;\nCREATE INDEX idx_ai_message_media_file ON ai_message_media(file_unique_id);\n-- Delivered display text already lives on the linked Telegram reply message.\nUPDATE ai_runs SET response_text=NULL WHERE status='delivered' AND response_text=(\n SELECT text FROM ai_messages WHERE chat_id=ai_runs.response_chat_id AND msg_id=ai_runs.response_msg_id\n);\n",
 ] as const;
 export const MIGRATIONS = [{
   "version": 1,
@@ -26,12 +27,15 @@ export const MIGRATIONS = [{
   "version": 5,
   "name": "ts_ai_loop_guard",
   "checksum": "9f268e9f31d2f75ac0f39a1f215ae447cb17678ef0d7f637708a125da6427ec3",
+}, {
+  "version": 6,
+  "name": "ts_minimal_storage",
+  "checksum": "a09375a0dec1092fa489e0257c64a4a4a2d2bd52b61a4bf2b5217352f182b774",
 }] as const;
 export const REQUIRED_TABLES = [
   "ai_chat_settings",
   "ai_message_media",
   "ai_messages",
-  "ai_run_context",
   "ai_runs",
   "ai_session_messages",
   "ai_session_provider_state",
@@ -47,7 +51,6 @@ export const REQUIRED_TABLES = [
   "chat_stat_bucket_daily",
   "chat_stat_daily",
   "chat_stat_user_daily",
-  "import_archives",
   "legacy_coc_attrs",
   "media_objects",
   "pic_rate_counter",
@@ -60,7 +63,7 @@ export const REQUIRED_TABLES = [
   "yt_dl_results",
 ] as const;
 export const REQUIRED_INDEXES = [
-  "idx_ai_message_media_hash",
+  "idx_ai_message_media_file",
   "idx_ai_runs_request",
   "idx_ai_runs_session_requested",
   "idx_ai_session_messages_chat_msg_context",

@@ -46,7 +46,7 @@ Deno.test("AI run completion accounts tokens exactly once and delivery is atomic
     repository.completeRun(run.id, result, 4);
     assertEquals(
       temporary.db.get<Record<string, number>>(
-        "SELECT total_input_tokens,total_output_tokens,total_cached_input_tokens FROM ai_sessions WHERE id=?",
+        "SELECT COALESCE(SUM(input_tokens),0) AS total_input_tokens,COALESCE(SUM(output_tokens),0) AS total_output_tokens,COALESCE(SUM(cached_input_tokens),0) AS total_cached_input_tokens FROM ai_runs WHERE session_id=?",
         session.id,
       ),
       { total_input_tokens: 100, total_output_tokens: 20, total_cached_input_tokens: 30 },

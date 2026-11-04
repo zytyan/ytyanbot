@@ -1,12 +1,12 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { MainDatabase } from "../../src/db/database.ts";
-import { MIGRATIONS, REQUIRED_TABLES } from "../../src/db/schema.ts";
+import { CANONICAL_SCHEMA, MIGRATIONS, REQUIRED_TABLES } from "../../src/db/schema.ts";
 import { temporaryDatabase } from "./helpers.ts";
 
 Deno.test("TS-owned database contains exact migrations and required objects", async () => {
   const temporary = await temporaryDatabase();
   try {
-    assertEquals(temporary.db.validate().version, 5);
+    assertEquals(temporary.db.validate().version, 6);
     assertEquals(
       temporary.db.all<{ version: number; checksum: string }>(
         "SELECT version,checksum FROM ts_schema_versions ORDER BY version",
@@ -48,14 +48,28 @@ Deno.test("db validation refuses checksum drift", async () => {
 Deno.test("v2 upgrade adds indexed request lookup without rewriting history and refuses altered checksums", async () => {
   const temp = await temporaryDatabase();
   try {
-    temp.db.run("DROP TABLE ai_session_suspensions");
-    temp.db.run("DROP INDEX idx_ai_runs_request");
-    temp.db.run("DROP TABLE ai_session_request_origins");
-    temp.db.run("DELETE FROM ts_schema_versions WHERE version>=3");
+    temp.db.raw.exec("PRAGMA foreign_keys=OFF");
+    for (
+      const table of temp.db.all<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+      )
+    ) temp.db.raw.exec(`DROP TABLE "${table.name}"`);
+    temp.db.raw.exec("PRAGMA foreign_keys=ON");
+    for (const schema of CANONICAL_SCHEMA.slice(0, 2)) temp.db.raw.exec(schema);
+    for (const migration of MIGRATIONS.slice(0, 2)) {
+      temp.db.run(
+        "INSERT INTO ts_schema_versions VALUES(?,?,?,1)",
+        migration.version,
+        migration.name,
+        migration.checksum,
+      );
+    }
     temp.db.run(
       "INSERT INTO ai_sessions(chat_id,topic_id,chat_name,chat_type,provider,model,created_at,updated_at) VALUES(-100,0,'test','supergroup','gemini','test',1,1)",
     );
-    const before = temp.db.all("SELECT * FROM ai_sessions");
+    const before = temp.db.all<{ id: number; chat_id: number; provider: string; model: string }>(
+      "SELECT id,chat_id,provider,model FROM ai_sessions",
+    );
     const versions = temp.db.all("SELECT * FROM ts_schema_versions");
     temp.db.run("UPDATE ts_schema_versions SET checksum='changed' WHERE version=1");
     await assertRejects(
@@ -68,10 +82,13 @@ Deno.test("v2 upgrade adds indexed request lookup without rewriting history and 
       undefined,
     );
     temp.db.run("UPDATE ts_schema_versions SET checksum=? WHERE version=1", MIGRATIONS[0].checksum);
-    temp.db.upgrade();
+    temp.db.upgrade({ offlineArchive: true });
     temp.db.upgrade(); // Re-running an accepted upgrade is harmless.
-    assertEquals(temp.db.validate().version, 5);
-    assertEquals(temp.db.all("SELECT * FROM ai_sessions"), before);
+    assertEquals(temp.db.validate().version, 6);
+    assertEquals(
+      temp.db.all("SELECT id,chat_id,provider,model FROM ai_sessions"),
+      before.map(({ id, chat_id, provider, model }) => ({ id, chat_id, provider, model })),
+    );
     assertEquals(temp.db.all("SELECT * FROM ts_schema_versions WHERE version<=2"), versions);
     const { SQL } = await import("../../src/db/queries.ts");
     const plan = temp.db.all<{ detail: string }>(

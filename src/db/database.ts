@@ -98,24 +98,27 @@ export class MainDatabase {
     }
   }
 
-  initialize(): void {
+  initialize(version: number = MIGRATIONS.length): void {
+    if (!Number.isInteger(version) || version < 1 || version > MIGRATIONS.length) {
+      throw new Error("invalid TS schema version");
+    }
     const count = this.get<{ count: number }>(
       "SELECT COUNT(*) AS count FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'",
     )?.count ?? 0;
     if (count !== 0) throw new Error(`database is not empty: found ${count} schema objects`);
     this.transaction(() => {
-      for (const schema of CANONICAL_SCHEMA) this.raw.exec(schema);
+      for (const schema of CANONICAL_SCHEMA.slice(0, version)) this.raw.exec(schema);
       const insert = this.raw.prepare(
         "INSERT INTO ts_schema_versions(version,name,checksum,applied_at) VALUES(?,?,?,unixepoch())",
       );
-      for (const migration of MIGRATIONS) {
+      for (const migration of MIGRATIONS.slice(0, version)) {
         insert.run(migration.version, migration.name, migration.checksum);
       }
     });
   }
 
   /** Apply only unapplied TS migrations; never accept an unknown or altered source history. */
-  upgrade(): void {
+  upgrade(options: { offlineArchive?: boolean } = {}): void {
     this.transaction(() => {
       const applied = this.all<{ version: number; name: string; checksum: string }>(
         "SELECT version,name,checksum FROM ts_schema_versions ORDER BY version",
@@ -132,6 +135,17 @@ export class MainDatabase {
         ) {
           throw new Error("database migration checksum mismatch or unknown version");
         }
+      }
+      if (
+        applied.length < 6 && !options.offlineArchive &&
+        (this.get<{ n: number }>("SELECT COUNT(*) AS n FROM ai_sessions")!.n ||
+          this.get<{ n: number }>("SELECT COUNT(*) AS n FROM media_objects")!.n ||
+          this.get<{ n: number }>("SELECT COUNT(*) AS n FROM ai_run_context")!.n ||
+          this.get<{ n: number }>("SELECT COUNT(*) AS n FROM import_archives")!.n)
+      ) {
+        throw new Error(
+          "populated pre-v6 database requires offline db-import to archive omitted data",
+        );
       }
       for (let i = applied.length; i < MIGRATIONS.length; i++) {
         this.raw.exec(CANONICAL_SCHEMA[i]!);

@@ -1,7 +1,7 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { AiRepository } from "../../src/ai/repository.ts";
 import { AiService, type IncomingAiMessage } from "../../src/ai/service.ts";
-import { ContentAddressedMediaStore } from "../../src/ai/media_store.ts";
+import { TelegramMediaStore } from "../../src/ai/media_store.ts";
 import type { AiRequest } from "../../src/ai/types.ts";
 import { parseConfig } from "../../src/config.ts";
 import { FakeTelegram, temporaryDatabase } from "./helpers.ts";
@@ -28,7 +28,7 @@ Deno.test("selected first reply and its media survive continuation, restart, and
         });
       },
       telegram,
-      new ContentAddressedMediaStore(`${temp.path}.media`),
+      new TelegramMediaStore(`${temp.path}.media`),
       () => config,
       { id: 99, firstName: "bot", username: "bot" },
     );

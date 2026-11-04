@@ -10,7 +10,7 @@ import {
 } from "./ai/service.ts";
 import { createAiGenerator } from "./ai/providers.ts";
 import { type AiProviderName, MODEL_OPTIONS, parseModelCallback } from "./ai/types.ts";
-import { ContentAddressedMediaStore } from "./ai/media_store.ts";
+import { TelegramMediaStore } from "./ai/media_store.ts";
 import type { ConfigStore } from "./config.ts";
 import type { MainDatabase } from "./db/database.ts";
 import {
@@ -282,7 +282,7 @@ export async function createApplication(
     repository,
     createAiGenerator(() => configs.value),
     telegram,
-    new ContentAddressedMediaStore(initial.aiMediaPath),
+    new TelegramMediaStore(initial.aiMediaPath),
     () => configs.value,
     { id: identity.id, firstName: identity.first_name, username: identity.username },
   );

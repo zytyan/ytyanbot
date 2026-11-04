@@ -14,8 +14,8 @@
 保留最多 100 个完成请求、64 个耗时至少 50 ms 的同步操作、8 次事件循环停顿。后台汇总最多 256
 个阶段，内联 SQL 指纹缓存最多 128 项。旧字段保留，新增字段如下：
 
-- measurements：历史消息/媒体数量、媒体和 assistant payload 字节数、上下文快照字符数、
-  出站请求字符数、原始响应和 assistant payload 字节数。字符数不冒充 UTF-8 字节数。 provider
+- measurements：历史消息/媒体数量、媒体和 assistant payload 字节数、 出站请求字符数、原始响应和
+  assistant payload 字节数。字符数不冒充 UTF-8 字节数。 provider
   的请求/响应大小是该请求中最近一次模型尝试的值；阶段耗时仍累计各次尝试。
 - slow_synchronous_spans：同步操作的阶段、时间、耗时、update/run ID 及成功/失败。 start_ms/end_ms
   为进程内单调时钟；started_at 为便于日志关联的墙上时间近似值。
@@ -32,7 +32,7 @@
 - db.begin/commit/rollback.<指纹>、db.transaction：包含等待写锁和事务提交，事务边界保持不变。 同步
   SQL 超过 100 ms 仍输出安全告警，后台汇总可观察非 AI 请求期间的峰值。
 - ai.history.sql / ai.history.media：区分同步历史查询及媒体读取。
-- ai.snapshot.json：请求快照映射与 JSON 序列化。
+- TS V6 已移除 ai.snapshot.json 与全量请求上下文快照持久化。
 - ai.persist.pending/generated/delivered：区分请求预存、模型结果落库、交付事务。
 - provider.history.build/replay：区分 SDK 消息构建和原生历史回放。
 - provider.request.parse/stringify、provider.response.parse、provider.payload.encode： 区分请求/响应

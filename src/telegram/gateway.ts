@@ -119,8 +119,11 @@ export class GrammyTelegramGateway implements TelegramPort {
     );
   }
 
-  async getFile(fileId: string): Promise<TelegramFile> {
-    const file = await this.bot.api.getFile(fileId);
+  async getFile(fileId: string, signal?: AbortSignal): Promise<TelegramFile> {
+    const file = await this.bot.api.getFile(
+      fileId,
+      signal as unknown as Parameters<Bot["api"]["getFile"]>[1],
+    );
     return {
       fileId: file.file_id,
       fileUniqueId: file.file_unique_id,

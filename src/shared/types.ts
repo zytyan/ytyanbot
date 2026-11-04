@@ -87,19 +87,19 @@ export interface TelegramPort {
     emoji: string,
     signal?: AbortSignal,
   ): Promise<void>;
-  getFile(fileId: string): Promise<TelegramFile>;
+  getFile(fileId: string, signal?: AbortSignal): Promise<TelegramFile>;
   downloadFile(file: TelegramFile, signal?: AbortSignal): Promise<Uint8Array>;
 }
 
 export interface MediaObject {
-  readonly sha256: string;
-  readonly relativePath: string;
+  readonly fileUniqueId: string;
+  readonly fileId: string;
   readonly byteSize: number;
   readonly mimeType: string;
 }
 
 export interface MediaStore {
-  put(bytes: Uint8Array, mimeType: string): Promise<MediaObject>;
-  open(sha256: string): Promise<Uint8Array>;
-  verify(sha256: string): Promise<boolean>;
+  put(bytes: Uint8Array, media: MediaObject): Promise<MediaObject>;
+  open(fileUniqueId: string): Promise<Uint8Array>;
+  verify(fileUniqueId: string): Promise<boolean>;
 }

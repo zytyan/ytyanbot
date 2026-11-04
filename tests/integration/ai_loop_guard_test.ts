@@ -87,7 +87,7 @@ Deno.test("third consecutive bot submission is stored only; restart, deduplicati
     assertEquals(temp.db.all("SELECT * FROM ai_runs").length, 6);
     assertEquals(
       temp.db.get<{ total_output_tokens: number }>(
-        "SELECT total_output_tokens FROM ai_sessions WHERE id=?",
+        "SELECT COALESCE(SUM(output_tokens),0) AS total_output_tokens FROM ai_runs WHERE session_id=?",
         id,
       )!.total_output_tokens,
       12,

@@ -2,7 +2,7 @@
 export const SQL = {
   "GetReactions": "SELECT reactions_enabled FROM ai_user_settings WHERE user_id=?;",
   "UsageForResponse":
-    "SELECT session_id,provider,model,input_tokens,output_tokens,cached_input_tokens,\ninput_message_count,input_first_msg_id,input_last_msg_id,cache_expire_at,raw_payload\nFROM ai_runs WHERE response_chat_id=? AND response_msg_id=? AND status='delivered';",
+    "SELECT session_id,provider,model,input_tokens,output_tokens,cached_input_tokens,\ninput_message_count,input_first_msg_id,input_last_msg_id,json_extract(candidate_state_json,'$.geminiCacheExpireTime') AS cache_expire_at\nFROM ai_runs WHERE response_chat_id=? AND response_msg_id=? AND status='delivered';",
   "SetReactions":
     "INSERT INTO ai_user_settings(user_id,reactions_enabled,updated_at) VALUES(?,?,?)\nON CONFLICT(user_id) DO UPDATE SET reactions_enabled=excluded.reactions_enabled,updated_at=excluded.updated_at;",
   "IsAiResponse":
@@ -11,9 +11,6 @@ export const SQL = {
     "INSERT INTO traditional_facts(feature,chat_id,topic_id,request_msg_id,reply_msg_id,status,context_text,created_at,delivery_status)\nVALUES(?,?,?,?,?,?,?,?,?);",
   "ReplyFacts":
     "SELECT feature,request_msg_id,reply_msg_id,status,context_text,created_at FROM traditional_facts\nWHERE chat_id=? AND topic_id=? AND reply_msg_id=? AND delivery_status='delivered' ORDER BY id;",
-  "FreezeRunContext":
-    "INSERT INTO ai_run_context(run_id,snapshot) VALUES(?,?) ON CONFLICT(run_id) DO NOTHING;",
-  "GetRunContext": "SELECT snapshot FROM ai_run_context WHERE run_id=?;",
   "RequestFacts":
     "SELECT feature,request_msg_id,reply_msg_id,status,context_text,created_at FROM traditional_facts\nWHERE chat_id=? AND topic_id=? AND request_msg_id=? ORDER BY id;",
   "RunForRequest":
@@ -26,7 +23,7 @@ export const SQL = {
   "SetChatConfig":
     "UPDATE chat_cfg SET auto_cvt_bili=?,auto_calculate=?,auto_exchange=?,auto_check_adult=?,resp_nsfw_msg=? WHERE id=?;",
   "BackupMedia":
-    "SELECT sha256,relative_path,byte_size,mime_type FROM media_objects ORDER BY sha256;",
+    "SELECT file_unique_id,file_id,byte_size,mime_type FROM media_objects ORDER BY file_unique_id;",
   "IndexAlbum":
     "INSERT INTO album_index(chat_id,topic_id,group_id,expires_at,photo_only) VALUES(?,?,?,?,?)\nON CONFLICT(chat_id,topic_id,group_id) DO UPDATE SET expires_at=MAX(expires_at,excluded.expires_at),photo_only=MIN(photo_only,excluded.photo_only);",
   "IndexAlbumFile":
@@ -57,4 +54,14 @@ export const SQL = {
     "INSERT INTO ai_session_request_origins(session_id,chat_id,msg_id,bot_streak,suppressed) VALUES(?,?,?,?,?);",
   "IsLoopSuppressedRequest":
     "SELECT 1 AS found FROM ai_session_request_origins WHERE chat_id=? AND msg_id=? AND suppressed=1 LIMIT 1;",
+  "SaveMedia":
+    "INSERT INTO media_objects(file_unique_id,file_id,byte_size,mime_type) VALUES(?,?,?,?)\nON CONFLICT(file_unique_id) DO UPDATE SET file_id=excluded.file_id;",
+  "SaveMessageMedia":
+    "INSERT INTO ai_message_media(chat_id,msg_id,ordinal,file_unique_id,media_kind) VALUES(?,?,?,?,?)\nON CONFLICT(chat_id,msg_id,ordinal) DO NOTHING;",
+  "MessageMedia":
+    "SELECT o.file_unique_id,o.file_id,o.byte_size,o.mime_type,mm.media_kind,mm.unavailable\nFROM ai_message_media mm LEFT JOIN media_objects o USING(file_unique_id)\nWHERE mm.chat_id=? AND mm.msg_id=? ORDER BY mm.ordinal;",
+  "UpdateMediaFileId": "UPDATE media_objects SET file_id=? WHERE file_unique_id=?;",
+  "SessionUsage":
+    "SELECT COALESCE(SUM(input_tokens),0) AS total_input_tokens,\nCOALESCE(SUM(output_tokens),0) AS total_output_tokens,\nCOALESCE(SUM(cached_input_tokens),0) AS total_cached_input_tokens FROM ai_runs WHERE session_id=?;",
+  "UnavailableMediaCount": "SELECT COUNT(*) AS count FROM ai_message_media WHERE unavailable=1;",
 } as const;

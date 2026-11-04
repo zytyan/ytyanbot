@@ -1,11 +1,12 @@
 # Repository agent guide
 
-- The sole active checkout and runtime root is `/opt/tgbots/ytyanbot`. The former
-  `/opt/tgbots/ytyanbot-ts` directory is retired: do not develop, deploy or write there.
+- The active development checkout is `/root/mycode/ytyanbot`; implement directly on `master`. The
+  live runtime root is `/opt/tgbots/ytyanbot`. The former `/opt/tgbots/ytyanbot-ts` directory is
+  retired: do not develop, deploy or write there.
 
 - Continue the existing Deno/TypeScript rewrite, not the separate Node prototype.
-- Evaluate against the latest relevant Go and TS branch commits, not a historical frozen baseline.
-  Record inspected SHAs for traceability, but refresh branch heads for every implementation slice.
+- Record inspected commit SHAs for traceability. Develop directly on the current TypeScript
+  `master`; refreshing or comparing archived Go branches is not a prerequisite for each change.
 - Prefer functional modules and direct mature SDK/library APIs. Do not add controller/service/port/
   adapter stacks, generic repositories, provider frameworks or DI containers without concrete need.
   Keep transaction, media integrity, cancellation and concurrency guarantees; data types are not
@@ -44,25 +45,28 @@
 - Persist AI requests before provider calls; transition pending to generated and aggregate usage
   exactly once. Retain generated payloads on delivery failure; atomically commit delivery and
   provider-state promotion. Persist provider and model separately. Keep Sub2API independent of
-  official Gemini cache/Interactions state. Save vercel-ai-messages-v1 with its provider/protocol
-  tag, SDK response messages including providerOptions, native assistant payload, and original HTTP
-  response bytes. SDK outputTokens already includes reasoning; do not add it again. Keep legacy
-  native history replay until offline imports have a verified replacement. Provider switching
-  deliberately rebuilds portable history. Cache-enabled new official Gemini sessions use native
-  generation; existing Interactions chains stay on Interactions. Never cache an opaque interaction
-  by replacing it with display text. Cache reuse verifies model/prompt/tools/content fingerprint and
-  sends the complete uncached tail. Per the user's 2026-10-13 revision, generation has a 15-minute
-  total deadline and at most five generation attempts shared across transient-error and
-  protocol/state recovery. SDK maxRetries=0 prevents nested retries. Authentication and terminal
-  errors are not retried; compatibility/state/cache recovery remains explicit and bounded. Never
-  retry Telegram side effects through the model SDK. Preserve billable successful responses, even
-  when their display text is empty.
+  official Gemini cache/Interactions state. Save one necessary replay payload with its
+  provider/protocol tag, SDK response messages including providerOptions and required native
+  assistant data. Do not persist full context snapshots or redundant original HTTP response copies.
+  Telegram media uses FileUniqueId identity and FileId recovery; do not hash media contents. SDK
+  outputTokens already includes reasoning; do not add it again. Keep legacy native history replay
+  until offline imports have a verified replacement. Provider switching deliberately rebuilds
+  portable history. Cache-enabled new official Gemini sessions use native generation; existing
+  Interactions chains stay on Interactions. Never cache an opaque interaction by replacing it with
+  display text. Cache reuse verifies model/prompt/tools/content fingerprint and sends the complete
+  uncached tail. Per the user's 2026-10-13 revision, generation has a 15-minute total deadline and
+  at most five generation attempts shared across transient-error and protocol/state recovery. SDK
+  maxRetries=0 prevents nested retries. Authentication and terminal errors are not retried;
+  compatibility/state/cache recovery remains explicit and bounded. Never retry Telegram side effects
+  through the model SDK. Preserve billable successful responses, even when their display text is
+  empty.
 - Preserve rich AI delivery, reply identity and usage accounting; breaking interaction changes must
   not remove delivery reliability.
 - Work on master (TypeScript/Deno). The former Go master is archived at archive/go-master-20261103.
-  Separate accepted features into commits, run deno task check and deno task test, and push each
-  accepted feature before the next. Explicitly requested plan corrections may proceed while remote
-  access is blocked; report the unsynced state and do not silently expand runtime implementation.
+  Run deno task check and deno task test. Implement directly on master; separate commits or pushing
+  each feature before continuing are not prerequisites. Explicitly requested plan corrections may
+  proceed while remote access is blocked; report the unsynced state and do not silently expand
+  runtime implementation.
 - Never commit production config, secrets, databases, media, logs, backups or runtime files. Tests
   use temporary databases and intercepted APIs.
 - Never stop, restart or replace the live service without explicit approval. Compilation or

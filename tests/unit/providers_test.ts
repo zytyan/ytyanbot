@@ -834,3 +834,44 @@ Deno.test("DeepSeek ambiguous mixed search arrays remain invalid rather than dis
   );
   assertEquals(mock.calls.length, 1);
 });
+
+Deno.test("linked Gemini retries only the delta and never resolves deferred history on transient errors", async () => {
+  let loads = 0;
+  const mock = intercepted((_call, index) =>
+    index < 3 ? json({ error: { message: "busy" } }, 503) : json(interactionResponse())
+  );
+  await mock.generate(request([user(), user({ messageId: 3, text: "new tail" })], {
+    newMessages: [user({ messageId: 3, text: "new tail" })],
+    explicitCache: true,
+    state: { geminiInteractionId: "remote", windowStartMessageId: 1 },
+    loadHistory: () => {
+      loads++;
+      throw new Error("history must remain deferred");
+    },
+  }));
+  assertEquals(mock.calls.length, 3);
+  assertEquals(loads, 0);
+  for (const call of mock.calls) {
+    assertEquals(call.body.previous_interaction_id, "remote");
+    assertEquals((call.body.input as unknown[]).length, 1);
+    assert(JSON.stringify(call.body.input).includes("new tail"));
+  }
+});
+
+Deno.test("exhausted shared attempt budget does not trigger unnecessary media reconstruction", async () => {
+  let loads = 0;
+  const mock = intercepted((_call, index) =>
+    json({ error: { message: "unavailable" } }, index < 5 ? 503 : 404)
+  );
+  await assertRejects(() =>
+    mock.generate(request([user()], {
+      state: { geminiInteractionId: "remote", windowStartMessageId: 1 },
+      loadHistory: () => {
+        loads++;
+        return Promise.resolve([user()]);
+      },
+    }))
+  );
+  assertEquals(mock.calls.length, 5);
+  assertEquals(loads, 0);
+});

@@ -1,10 +1,20 @@
 import type { ModelMessage } from "ai";
-import type { AiMessage, AiProviderName } from "./types.ts";
+import type { AiMessage, AiProviderName, AiRequest } from "./types.ts";
 import { supportsImages } from "./types.ts";
 
 export type ApiMode = "generateContent" | "interactions" | "deepseek" | "deepseek-anthropic";
 export const SDK_PAYLOAD_FORMAT = "vercel-ai-messages-v1";
 const decoder = new TextDecoder();
+
+/** A changed local window or provider requires rebuilding rather than linking remote history. */
+export function linkedGeminiInteraction(
+  request: Pick<AiRequest, "provider" | "state" | "messages" | "historyRebuildLossy">,
+): string | undefined {
+  return request.provider === "gemini" && !request.historyRebuildLossy &&
+      request.state.windowStartMessageId === request.messages[0]?.messageId
+    ? request.state.geminiInteractionId
+    : undefined;
+}
 
 export function savedPayload(message: AiMessage): unknown {
   if (!message.assistantPayload) return undefined;

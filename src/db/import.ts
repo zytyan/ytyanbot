@@ -2,7 +2,8 @@ import { resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { SQL } from "./queries.ts";
 import { MainDatabase } from "./database.ts";
-import { ContentAddressedMediaStore } from "../ai/media_store.ts";
+import { backup } from "node:sqlite";
+import { MIGRATIONS } from "./schema.ts";
 
 type Value = null | number | bigint | string | Uint8Array;
 type Row = Record<string, Value>;
@@ -84,15 +85,30 @@ export async function importDatabase(options: ImportOptions): Promise<Record<str
     const tables = source.all<{ name: string }>(
       "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
     ).map((row) => row.name);
-    if (!tables.includes("schema_migrations")) {
+    const tsSource = tables.includes("ts_schema_versions");
+    if (!tsSource && !tables.includes("schema_migrations")) {
       throw new Error(
         "source must be Go/legacy TS canonical V9–V11; migrate older sources with Go offline tools first",
       );
     }
-    const migrations = source.all<Row>("SELECT * FROM schema_migrations ORDER BY version");
+    const migrations = source.all<Row>(
+      `SELECT * FROM ${tsSource ? "ts_schema_versions" : "schema_migrations"} ORDER BY version`,
+    );
     const version = Number(migrations.at(-1)?.version);
-    if (![9, 10, 11].includes(version) || migrations.length !== version) {
+    if (
+      !(tsSource ? [1, 2, 3, 4, 5] : [9, 10, 11]).includes(version) || migrations.length !== version
+    ) {
       throw new Error("unsupported or incomplete source migration history");
+    }
+    if (tsSource) {
+      for (let i = 0; i < migrations.length; i++) {
+        if (
+          migrations[i]!.name !== MIGRATIONS[i]!.name ||
+          migrations[i]!.checksum !== MIGRATIONS[i]!.checksum
+        ) {
+          throw new Error("source TS migration checksum mismatch");
+        }
+      }
     }
     for (
       const name of [
@@ -120,8 +136,8 @@ export async function importDatabase(options: ImportOptions): Promise<Record<str
     reserved = true;
     const stage = `${output}/.staging`;
     await Deno.mkdir(stage);
-    target = new MainDatabase(`${stage}/main.db`);
-    target.initialize();
+    target = new MainDatabase(`${stage}/.working.db`);
+    target.initialize(5);
     const targetTables = new Set(
       target.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table'").map((row) =>
         row.name
@@ -136,10 +152,10 @@ export async function importDatabase(options: ImportOptions): Promise<Record<str
       );
       for (const trigger of triggers) target!.raw.exec(`DROP TRIGGER ${quote(trigger.name)}`);
       for (const name of tables) {
-        if (name === "schema_migrations") continue;
+        if (name === "schema_migrations" || name === "ts_schema_versions") continue;
         const rows = rows64(source, name);
         const destination = name === "character_attrs" ? "legacy_coc_attrs" : name;
-        if (!targetTables.has(destination) || name === "ai_session_provider_state") {
+        if (!targetTables.has(destination) || (!tsSource && name === "ai_session_provider_state")) {
           // Source-only data, including albums, is explicitly archived rather than silently discarded.
           const insert = target!.raw.prepare(
             "INSERT INTO import_archives(source_table,row_key,payload) VALUES(?,?,?)",
@@ -185,7 +201,7 @@ export async function importDatabase(options: ImportOptions): Promise<Record<str
     for (const mapping of report) {
       const name = String(mapping.source);
       const rows = rows64(source, name);
-      const copied = mapping.destination === "import_archives"
+      const copied = mapping.destination === "import_archives" && mapping.action === "archive"
         ? archivedRows(target, name)
         : rows64(target, String(mapping.destination));
       const original = digest(rows);
@@ -272,23 +288,131 @@ export async function importDatabase(options: ImportOptions): Promise<Record<str
     if (media.length && !options.media) {
       throw new Error("source references media; --media source directory is required");
     }
-    const oldMedia = new ContentAddressedMediaStore(options.media ?? "");
-    const newMedia = new ContentAddressedMediaStore(`${stage}/ai-media`);
-    await Deno.mkdir(newMedia.root, { recursive: true });
+    await Deno.mkdir(`${stage}/archive/media`, { recursive: true });
+    // An independent SQLite snapshot preserves all omitted BLOBs, snapshots and original metadata.
+    await backup(source.raw, `${stage}/archive/source.db`);
+    const missingSourceMedia: string[] = [];
     for (const item of media) {
-      if (item.relative_path !== `sha256/${item.sha256.slice(0, 2)}/${item.sha256}`) {
+      if (
+        !/^[0-9a-f]{64}$/.test(item.sha256) ||
+        item.relative_path !== `sha256/${item.sha256.slice(0, 2)}/${item.sha256}`
+      ) {
         throw new Error("noncanonical source media path");
       }
-      const bytes = await oldMedia.open(item.sha256);
-      if (bytes.length !== item.byte_size) throw new Error(`media size mismatch: ${item.sha256}`);
-      const copied = await newMedia.put(bytes, item.mime_type);
-      if (copied.sha256 !== item.sha256 || !await newMedia.verify(item.sha256)) {
-        throw new Error("media copy validation failed");
+      const path = `${options.media}/${item.relative_path}`;
+      let stat: Deno.FileInfo;
+      try {
+        stat = await Deno.lstat(path);
+      } catch (error) {
+        if (!(error instanceof Deno.errors.NotFound)) throw error;
+        missingSourceMedia.push(item.sha256);
+        continue;
       }
+      if (!stat.isFile || stat.size !== item.byte_size) {
+        throw new Error("corrupt source media size");
+      }
+      const destination = `${stage}/archive/media/${item.relative_path}`;
+      await Deno.mkdir(destination.slice(0, destination.lastIndexOf("/")), { recursive: true });
+      await Deno.copyFile(path, destination);
+      // Byte comparison verifies the archive copy without generating a content hash.
+      const original = await Deno.readFile(path), copied = await Deno.readFile(destination);
+      if (original.length !== copied.length || original.some((byte, i) => byte !== copied[i])) {
+        throw new Error("media archive copy mismatch");
+      }
+    }
+    const references = target.all<
+      { chat_id: number; msg_id: number; ordinal: number; media_kind: string }
+    >(
+      "SELECT chat_id,msg_id,ordinal,media_kind FROM ai_message_media ORDER BY chat_id,msg_id,ordinal",
+    );
+    const runTokens = target.get<Row>(
+      "SELECT COALESCE(SUM(input_tokens),0) AS input,COALESCE(SUM(output_tokens),0) AS output,COALESCE(SUM(cached_input_tokens),0) AS cached FROM ai_runs",
+    );
+    const retainedRuns = function* (db: MainDatabase): Iterable<Row> {
+      for (const row of rows64(db, "ai_runs")) {
+        const {
+          raw_payload: _raw,
+          thought_signature: _signature,
+          cache_expire_at: _expiry,
+          ...retained
+        } = row;
+        if (
+          retained.status === "delivered" && retained.response_text != null &&
+          db.get<{ text: string }>(
+              "SELECT text FROM ai_messages WHERE chat_id=? AND msg_id=?",
+              retained.response_chat_id!,
+              retained.response_msg_id!,
+            )?.text === retained.response_text
+        ) retained.response_text = null;
+        yield retained;
+      }
+    };
+    const replay = digest(retainedRuns(target));
+    target.upgrade({ offlineArchive: true });
+    target.transaction(() => {
+      for (const reference of references) {
+        target!.run(
+          "INSERT INTO ai_message_media(chat_id,msg_id,ordinal,media_kind,unavailable) VALUES(?,?,?,?,1)",
+          reference.chat_id,
+          reference.msg_id,
+          reference.ordinal,
+          reference.media_kind,
+        );
+      }
+    });
+    if (encode(replay) !== encode(digest(retainedRuns(target)))) {
+      throw new Error("retained run/payload validation failed");
+    }
+    const afterTokens = target.get<Row>(
+      "SELECT COALESCE(SUM(input_tokens),0) AS input,COALESCE(SUM(output_tokens),0) AS output,COALESCE(SUM(cached_input_tokens),0) AS cached FROM ai_runs",
+    );
+    if (encode(runTokens) !== encode(afterTokens)) throw new Error("run token validation failed");
+    // Copy into a fresh database: dropped BLOBs must not remain in free pages.
+    // Deno disables SQLite ATTACH, so VACUUM cannot be used here.
+    const compact = new MainDatabase(`${stage}/main.db`);
+    try {
+      compact.initialize();
+      compact.transaction(() => {
+        compact.raw.exec("PRAGMA defer_foreign_keys=ON");
+        const triggers = compact.all<{ name: string; sql: string }>(
+          "SELECT name,sql FROM sqlite_master WHERE type='trigger'",
+        );
+        for (const trigger of triggers) compact.raw.exec(`DROP TRIGGER ${quote(trigger.name)}`);
+        for (
+          const { name } of target!.all<{ name: string }>(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'ts_schema_versions'",
+          )
+        ) {
+          const columns = compact.all<{ name: string; hidden: number }>(
+            `PRAGMA table_xinfo(${quote(name)})`,
+          ).filter((c) => !c.hidden).map((c) => c.name);
+          const insert = compact.raw.prepare(
+            `INSERT INTO ${quote(name)}(${columns.map(quote).join(",")}) VALUES(${
+              columns.map(() => "?").join(",")
+            })`,
+          );
+          for (const row of rows64(target!, name)) insert.run(...columns.map((c) => row[c]!));
+          if (encode(digest(rows64(target!, name))) !== encode(digest(rows64(compact, name)))) {
+            throw new Error(`compact validation failed: ${name}`);
+          }
+        }
+        for (const trigger of triggers) compact.raw.exec(trigger.sql);
+      });
+      compact.validate();
+    } catch (error) {
+      compact.close();
+      throw error;
+    }
+    target.close();
+    target = compact;
+    await Deno.remove(`${stage}/.working.db`);
+    await Deno.mkdir(`${stage}/ai-media`);
+    for (const mapping of report) {
+      if (mapping.destination === "import_archives") mapping.destination = "archive/source.db";
     }
     const checked = target.validate();
     const manifest = {
-      format: "ytyanbot-ts-import-v1",
+      format: "ytyanbot-ts-import-v2",
       source: sourcePath,
       sourceVersion: version,
       sourceMigrations: migrations,
@@ -297,9 +421,21 @@ export async function importDatabase(options: ImportOptions): Promise<Record<str
       tables: report,
       albumMapping,
       tokens,
-      media: { count: media.length, bytes: media.reduce((sum, item) => sum + item.byte_size, 0) },
+      runTokens,
+      priorRunDigest: replay,
+      archive:
+        "archive/source.db and archive/media; legacy media have no verified Telegram identity",
+      unavailableMediaReferences: references.length,
+      media: {
+        count: media.length,
+        bytes: media.reduce((sum, item) => sum + item.byte_size, 0),
+        archivedCount: media.length - missingSourceMedia.length,
+        missingSourceMedia,
+      },
       validation: checked,
-      providerState: "archived; new requests rebuild from preserved native history",
+      providerState: tsSource
+        ? "preserved"
+        : "archived; new requests rebuild from preserved native history",
       createdAt: new Date().toISOString(),
     };
     target.raw.exec("PRAGMA wal_checkpoint(TRUNCATE)");

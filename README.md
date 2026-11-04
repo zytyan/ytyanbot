@@ -1,7 +1,7 @@
 # ytyanbot-ts
 
-`ytyanbot-ts` 是独立的 TypeScript/Deno 重构，功能分析和迁移以当前最新 Go/TS 提交为准，
-不再以历史冻结 commit 定义目标。当前实现 AI、视频/音频下载与 Bilibili 转换、NSFW 检测和图库评分、
+`ytyanbot-ts` 是独立的 TypeScript/Deno 重构，在当前 `master` 直接开发并记录检查基线，
+不要求逐项刷新或推送分支。当前实现 AI、视频/音频下载与 Bilibili 转换、NSFW 检测和图库评分、
 群消息统计/日报，以及已上线功能的群配置。
 
 后续迁移沿用本仓库：**只裁剪 CoC，保留其他能力，但允许数据库与交互 breaking change**。 新 TS
@@ -13,10 +13,11 @@
 [架构分析](docs/architecture-sdk-analysis.md)。普通 `/roll` 已补齐，包含旧 `delme`
 删除按钮兼容和离线测试。
 
-**TS 独立 V1/V2 数据库与一次性离线导入器已实现**：运行时只接受 TS 库，Go canonical V9–V11 通过
+**TS 独立 V6 数据库与一次性离线导入器已实现**：运行时只接受 TS 库，Go canonical V9–V11 通过
 `db-import` 只读导入新目标目录，校验行数据、Token、payload、媒体与外键，并输出报告。
-导入失败不发布目标、不修改源库。AI-first 编排和传统事实注入已实现。AI 媒体继续使用
-`ai-media/sha256/<prefix>/<sha256>`；实际切换按本次会话的明确授权执行。
+导入失败不发布目标、不修改源库。AI-first 编排和传统事实注入已实现。AI 媒体使用 Telegram FileUniqueId
+标识，缺失缓存通过 FileId 补下载， 不计算内容哈希；精简存储与旧库离线归档方式见
+[数据库说明](docs/database.md)。
 
 ## 固定工具链
 
@@ -44,7 +45,7 @@ src/
   download/    URL/Bilibili 处理、进程执行、缓存和 singleflight
   nsfw/        Cloudflare Clef-flash、图库和用户评分
   stats/       统计缓存、聚合和日报
-  db/          TS V1/V2 schema、只读导入、初始化和严格检查
+  db/          TS V6 schema、只读导入、初始化和严格检查
   telegram/    grammY typed API 与 sendRichMessage 窄适配
   shared/      当前共享类型与有界并发原语（单实现端口计划收拢）
 ```
@@ -142,8 +143,8 @@ Sub2API 模型列表可用，但当前 tiered 生成返回 404；用户已确认
 `PUT /loggers/runtime/<level>`
 控制运行日志；`/debug/runtime`、`/debug/profile?seconds=1..60`、`/debug/heap` 提供 Deno
 指标、Chrome/V8 CPU profile 和 heap snapshot，取代 Go pprof 格式。 `/backupdb?db=main|all&media=0|1`
-下载一致性快照的 tar.gz，media=1 校验并附带全部登记媒体和清单， media=0 明确标记非完整 AI
-数据集。`GOYTYAN_BACKUP_MAX_DURATION` 支持 ms/s/m/h（缺省 30m）。
+下载一致性快照的 tar.gz，media=1 按标识/大小校验并附带现有缓存和缺失清单，缓存缺失及 media=0
+明确标记非完整 AI 数据集。`GOYTYAN_BACKUP_MAX_DURATION` 支持 ms/s/m/h（缺省 30m）。
 
 `media-gc --database <TS.db> --media <root> --grace-hours <positive>` 默认仅预览； `--apply`
 只能在程序停止时使用，仅删除未登记且超过明确宽限期的文件，不删除数据库历史。

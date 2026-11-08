@@ -67,3 +67,18 @@ Deno.test("Bilibili download parsing handles the short-link alias and canonicali
   const { assertRejects } = await import("@std/assert");
   await assertRejects(() => parseDownloadKey("https://www.bilibili.com/read/cv1", false));
 });
+
+Deno.test("Bilibili helper failures expose diagnostic categories without credentials or signed URLs", async () => {
+  const { BilibiliDownloadError } = await import("../../src/download/service.ts");
+  const error = new BilibiliDownloadError(
+    1,
+    new TextEncoder().encode(
+      'app playurl failed: {"code":-101,"access_token":"secret"} https://cdn.example/video?sign=private SESSDATA=secret',
+    ),
+  );
+  assertEquals(error.message.includes("app playurl failed"), true);
+  assertEquals(error.message.includes("-101"), true);
+  assertEquals(error.message.includes("secret"), false);
+  assertEquals(error.message.includes("private"), false);
+  assertEquals(error.message.includes("https://"), false);
+});

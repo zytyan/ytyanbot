@@ -119,7 +119,7 @@ Deno.test("Cache eligibility blocks other providers, fresh/small history, lossy 
     return Promise.resolve(response({ totalTokens: 20 }));
   };
   const cases: Partial<AiRequest>[] = [
-    { provider: "sub2api" },
+    { provider: "cliproxyapi" },
     { provider: "deepseek" },
     { explicitCache: false },
     { historyRebuildLossy: true },

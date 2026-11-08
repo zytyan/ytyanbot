@@ -1,5 +1,7 @@
 export const MODEL_GEMINI_ARGON = "gemini-4-argon";
 export const MODEL_GEMINI_FLASH = "gemini-3-flash-preview";
+export const MODEL_SONNET_46 = "claude-sonnet-4-6";
+export const MODEL_GEMINI_38_FLASH = "gemini-3.8-flash-high";
 export const MODEL_GEMINI_37_FLASH = "gemini-3.7-flash";
 export const MODEL_GEMINI_FLASH_LITE = "gemini-3.1-flash-lite";
 export const MODEL_DEEPSEEK_FLASH = "deepseek-flash";
@@ -13,7 +15,7 @@ export const isRetiredDeepSeekModel = (model: string) =>
     "deepseek-reasoner",
   ].includes(model);
 
-export type AiProviderName = "gemini" | "sub2api" | "deepseek";
+export type AiProviderName = "gemini" | "cliproxyapi" | "deepseek";
 export type AiRole = "user" | "model" | "system";
 
 export interface AiMedia {
@@ -97,14 +99,9 @@ export interface AiSession {
   readonly historyRebuildLossy: boolean;
 }
 
-// aimodel2 callbacks use this stable index; append new options, never reorder this version.
+// aimodel3 callbacks use this stable index; append new options, never reorder this version.
 export const MODEL_OPTIONS = Object.freeze([
   { model: MODEL_GEMINI_37_FLASH, label: "Gemini 3.7 Flash", provider: "gemini" as const },
-  {
-    model: MODEL_GEMINI_37_FLASH,
-    label: "Gemini 3.7 Flash（Sub2API）",
-    provider: "sub2api" as const,
-  },
   { model: MODEL_GEMINI_FLASH, label: "Gemini 3 Flash Preview", provider: "gemini" as const },
   { model: MODEL_GEMINI_FLASH_LITE, label: "Gemini 3.1 Flash-Lite", provider: "gemini" as const },
   {
@@ -124,6 +121,12 @@ export const MODEL_OPTIONS = Object.freeze([
   },
   { model: MODEL_GEMINI_ARGON, label: "Gemini 4 Argon", provider: "gemini" as const },
   { model: MODEL_DEEPSEEK_PRO, label: "DeepSeek V4 Pro（搜索）", provider: "deepseek" as const },
+  { model: MODEL_SONNET_46, label: "Claude Sonnet 4.6（CPA）", provider: "cliproxyapi" as const },
+  {
+    model: MODEL_GEMINI_38_FLASH,
+    label: "Gemini 3.8 Flash（CPA）",
+    provider: "cliproxyapi" as const,
+  },
 ]);
 
 export function supportsImages(provider: AiProviderName, model: string): boolean {
@@ -133,7 +136,7 @@ export function supportsImages(provider: AiProviderName, model: string): boolean
 }
 
 export function parseModelCallback(data: string) {
-  const match = /^aimodel2:(\d+):(\d+)$/.exec(data);
+  const match = /^aimodel3:(\d+):(\d+)$/.exec(data);
   if (!match) return undefined;
   const sessionId = Number(match[1]);
   const option = MODEL_OPTIONS[Number(match[2])];

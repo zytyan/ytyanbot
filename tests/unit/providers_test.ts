@@ -38,13 +38,14 @@ const request = (messages: AiMessage[], overrides: Partial<AiRequest> = {}): AiR
   allowCodeExecution: true,
   explicitCache: false,
   state: {},
+  ...(overrides.provider === "cliproxyapi" ? { model: "gemini-3.8-flash-high" } : {}),
   ...overrides,
 });
 const config = parseConfig(`
 database-path: /tmp/unused.db
 gemini-key: mock-gemini
-sub2api-key: mock-sub2
-sub2api-base-url: https://sub2.example/antigravity/v1beta
+cliproxyapi-key: mock-cpa
+cliproxyapi-base-url: https://cpa.example
 deepseek-key: mock-deepseek
 deepseek-base-url: https://deepseek.example
 `);
@@ -170,11 +171,11 @@ Deno.test("DeepSeek vision receives images while text-only selection does not", 
   assertEquals(mock.calls.length, 2);
 });
 
-Deno.test("Sub2API uses native tiered route and cannot leak official credentials/cache/state", async () => {
+Deno.test("CLIProxyAPI Gemini uses native route and cannot leak official credentials/cache/state", async () => {
   const mock = intercepted(() => json(nativeResponse()));
   const first = await mock.generate(request([user()], {
-    provider: "sub2api",
-    model: "gemini-3.7-flash",
+    provider: "cliproxyapi",
+    model: "gemini-3.8-flash-high",
     explicitCache: true,
     state: {
       geminiInteractionId: "official-id",
@@ -184,9 +185,9 @@ Deno.test("Sub2API uses native tiered route and cannot leak official credentials
   }));
   assertEquals(
     mock.calls[0]!.url,
-    "https://sub2.example/antigravity/v1beta/models/gemini-3.7-flash-tiered:generateContent",
+    "https://cpa.example/v1beta/models/gemini-3.8-flash-high:generateContent",
   );
-  assertEquals(mock.calls[0]!.headers.get("x-goog-api-key"), "mock-sub2");
+  assertEquals(mock.calls[0]!.headers.get("x-goog-api-key"), "mock-cpa");
   assert(!JSON.stringify(mock.calls[0]!.body).includes("official"));
   assertEquals(first.state, {});
   assertEquals(first.thoughtSignature, "AQID");
@@ -199,13 +200,82 @@ Deno.test("Sub2API uses native tiered route and cannot leak official credentials
   assertEquals(JSON.parse(decoder.decode(first.raw)), nativeResponse());
   await mock.generate(
     request([user(), assistant(first), user({ messageId: 3 })], {
-      provider: "sub2api",
-      model: "gemini-3.7-flash",
+      provider: "cliproxyapi",
+      model: "gemini-3.8-flash-high",
     }),
   );
   const contents = mock.calls[1]!.body.contents as { parts: Record<string, unknown>[] }[];
   assertEquals(contents[1]!.parts[0]!.thoughtSignature, "AQID");
   assertEquals(mock.calls.length, 2);
+});
+
+Deno.test("CPA Sonnet uses Claude Messages with isolated state, images, signed replay and usage", async () => {
+  const wire = {
+    id: "msg-cpa",
+    type: "message",
+    role: "assistant",
+    model: "claude-sonnet-4-6",
+    content: [
+      { type: "thinking", thinking: "reasoning", signature: "cpa-signature" },
+      { type: "text", text: "Sonnet answer" },
+    ],
+    stop_reason: "end_turn",
+    stop_sequence: null,
+    usage: { input_tokens: 12, output_tokens: 7, cache_read_input_tokens: 4 },
+  };
+  const mock = intercepted(() => json(wire));
+  const photo = user({
+    media: [{ kind: "image", mimeType: "image/png", bytes: new Uint8Array([1, 2, 3]) }],
+  });
+  const selection = { provider: "cliproxyapi" as const, model: "claude-sonnet-4-6" };
+  const first = await mock.generate(request([photo], {
+    ...selection,
+    explicitCache: true,
+    state: { geminiInteractionId: "official", geminiCacheName: "cachedContents/official" },
+  }));
+  const call = mock.calls[0]!;
+  assertEquals(call.url, "https://cpa.example/v1/messages");
+  assertEquals(call.headers.get("x-api-key"), "mock-cpa");
+  assertEquals(call.headers.get("authorization"), "Bearer mock-cpa");
+  assertEquals(call.headers.get("x-goog-api-key"), null);
+  assertEquals(call.body.model, "claude-sonnet-4-6");
+  assertEquals(call.body.tools, undefined);
+  assert(!JSON.stringify(call.body).includes("official"));
+  assert(JSON.stringify(call.body.messages).includes('"type":"image"'));
+  assertEquals(first.displayText, "Sonnet answer");
+  assertEquals(first.state, {});
+  assertEquals(first.usage.inputTokens, 16);
+  assertEquals(first.usage.outputTokens, 7);
+  assertEquals(first.usage.cachedInputTokens, 4);
+  const payload = JSON.parse(decoder.decode(first.assistantPayload));
+  assertEquals(payload.provider, "cliproxyapi");
+  assertEquals(payload.mode, "anthropic");
+  assertEquals(payload.native, wire.content);
+  await mock.generate(request([photo, assistant(first), user({ messageId: 3 })], selection));
+  assert(JSON.stringify(mock.calls[1]!.body.messages).includes("cpa-signature"));
+  assertEquals(mock.calls.length, 2);
+});
+
+Deno.test("CPA rejects removed and unlisted models before any provider request", async () => {
+  const mock = intercepted(() => json(nativeResponse()));
+  await assertRejects(
+    () =>
+      mock.generate(request([user()], {
+        provider: "cliproxyapi",
+        model: "gemini-3.7-flash",
+      })),
+    Error,
+    "unsupported CLIProxyAPI model",
+  );
+  await assertRejects(
+    () =>
+      mock.generate(request([user()], {
+        provider: "sub2api" as AiRequest["provider"],
+      })),
+    Error,
+    "unsupported AI provider",
+  );
+  assertEquals(mock.calls.length, 0);
 });
 
 Deno.test("DeepSeek vision merges photo-followup and moves latest historical image to active user", async () => {
@@ -287,7 +357,7 @@ Deno.test("Native legacy payloads replay exactly, including unknown signed tool 
         assistantPayload: encoder.encode(JSON.stringify(native)),
       }),
       user({ messageId: 3 }),
-    ], { provider: "sub2api", model: "gemini-3.7-flash" }),
+    ], { provider: "cliproxyapi", model: "gemini-3.8-flash-high" }),
   );
   assertEquals((mock.calls[0]!.body.contents as unknown[])[1], native);
 });
@@ -372,8 +442,8 @@ Deno.test("Transient errors have five bounded attempts and cancellation/missing 
   assertEquals(mock.calls.length, 5);
   await assertRejects(
     () =>
-      createAiGenerator(() => ({ ...config, sub2apiKey: "" }))(
-        request([user()], { provider: "sub2api" }),
+      createAiGenerator(() => ({ ...config, cliproxyapiKey: "" }))(
+        request([user()], { provider: "cliproxyapi" }),
       ),
     Error,
     "API Key 未配置",
@@ -392,7 +462,7 @@ Deno.test("Corrupt legacy payload is rejected rather than dropping its signature
           assistantPayload: encoder.encode("{bad"),
         }),
         user({ messageId: 3 }),
-      ], { provider: "sub2api" }),
+      ], { provider: "cliproxyapi" }),
     )
   );
   assertEquals(mock.calls.length, 0);
@@ -403,14 +473,14 @@ Deno.test("transient recovery returns successful usage once and terminal errors 
     const mock = intercepted((_call, index) =>
       index === 1 ? json({ error: { message: "temporary" } }, status) : json(nativeResponse())
     );
-    const result = await mock.generate(request([user()], { provider: "sub2api" }));
+    const result = await mock.generate(request([user()], { provider: "cliproxyapi" }));
     assertEquals(mock.calls.length, 2);
     assertEquals(result.usage.inputTokens, 11);
     assertEquals(result.usage.outputTokens, 5);
   }
   for (const status of [400, 401, 403, 404]) {
     const mock = intercepted(() => json({ error: { message: "terminal" } }, status));
-    await assertRejects(() => mock.generate(request([user()], { provider: "sub2api" })));
+    await assertRejects(() => mock.generate(request([user()], { provider: "cliproxyapi" })));
     assertEquals(mock.calls.length, 1);
   }
 });
@@ -427,7 +497,7 @@ Deno.test("cancelling retry backoff sends no further generation attempts", async
     return Promise.reject(signal!.reason);
   });
   await assertRejects(
-    () => generate(request([user()], { provider: "sub2api", signal: abort.signal })),
+    () => generate(request([user()], { provider: "cliproxyapi", signal: abort.signal })),
     Error,
     "cancelled during backoff",
   );
@@ -448,7 +518,7 @@ Deno.test("native Gemini usage includes tool-use prompts and adds reasoning only
       },
     })
   );
-  const result = await mock.generate(request([user()], { provider: "sub2api" }));
+  const result = await mock.generate(request([user()], { provider: "cliproxyapi" }));
   assertEquals(result.usage.inputTokens, 9404);
   assertEquals(result.usage.outputTokens, 588);
   assertEquals(result.usage.thinkingTokens, 305);
@@ -471,13 +541,13 @@ Deno.test("SDK round-trips Gemini provider-executed code results without local t
   };
   const mock = intercepted(() => json(wire));
   const first = await mock.generate(
-    request([user()], { provider: "sub2api", model: "gemini-3.7-flash" }),
+    request([user()], { provider: "cliproxyapi", model: "gemini-3.8-flash-high" }),
   );
   assertEquals(mock.calls.length, 1);
   await mock.generate(
     request([user(), assistant(first), user({ messageId: 3 })], {
-      provider: "sub2api",
-      model: "gemini-3.7-flash",
+      provider: "cliproxyapi",
+      model: "gemini-3.8-flash-high",
     }),
   );
   const contents = mock.calls[1]!.body.contents as { parts: Record<string, unknown>[] }[];
@@ -501,7 +571,7 @@ Deno.test("Provider response bytes are retained verbatim, not reconstructed from
     () => config,
     () => Promise.resolve(new Response(raw, { headers: { "content-type": "application/json" } })),
   );
-  const result = await generate(request([user()], { provider: "sub2api" }));
+  const result = await generate(request([user()], { provider: "cliproxyapi" }));
   assertEquals(decoder.decode(result.raw), raw);
 });
 
@@ -511,7 +581,7 @@ Deno.test("Gemini safety block still retains raw response, reason and billable u
     usageMetadata: { promptTokenCount: 11 },
   };
   const mock = intercepted(() => json(wire));
-  const result = await mock.generate(request([user()], { provider: "sub2api" }));
+  const result = await mock.generate(request([user()], { provider: "cliproxyapi" }));
   assertEquals(result.displayText, "");
   assertEquals(result.feedback, "SAFETY");
   assertEquals(result.usage.inputTokens, 11);
@@ -530,7 +600,7 @@ Deno.test("Cancellation during provider call aborts the request without a retry"
     });
   });
   await assertRejects(
-    () => generate(request([user()], { provider: "sub2api", signal: abort.signal })),
+    () => generate(request([user()], { provider: "cliproxyapi", signal: abort.signal })),
     Error,
     "cancelled in flight",
   );
@@ -539,7 +609,7 @@ Deno.test("Cancellation during provider call aborts the request without a retry"
 
 Deno.test("Model callbacks distinguish equal model names and stay below Telegram's byte limit", () => {
   MODEL_OPTIONS.forEach((option, index) => {
-    const data = `aimodel2:9007199254740991:${index}`;
+    const data = `aimodel3:9007199254740991:${index}`;
     assert(encoder.encode(data).length <= 64);
     assertEquals(parseModelCallback(data), { sessionId: Number.MAX_SAFE_INTEGER, option });
   });
@@ -547,22 +617,30 @@ Deno.test("Model callbacks distinguish equal model names and stay below Telegram
     m.model === "gemini-3.7-flash" && m.provider === "gemini"
   );
   const proxy = MODEL_OPTIONS.findIndex((m) =>
-    m.model === "gemini-3.7-flash" && m.provider === "sub2api"
+    m.model === "gemini-3.8-flash-high" && m.provider === "cliproxyapi"
   );
-  assert(official !== proxy);
+  assert(official >= 0 && proxy >= 0 && official !== proxy);
+  assertEquals(
+    MODEL_OPTIONS.filter((m) => m.provider === "cliproxyapi").map((m) => [m.model, m.label]),
+    [
+      ["claude-sonnet-4-6", "Claude Sonnet 4.6（CPA）"],
+      ["gemini-3.8-flash-high", "Gemini 3.8 Flash（CPA）"],
+    ],
+  );
   [
-    "aimodel:0:gemini-3.7-flash",
-    "aimodel2:-1:0",
-    "aimodel2:0:99",
-    "aimodel2:9007199254740992:0",
-    "aimodel2:1:0junk",
+    "aimodel:0:gemini-3.8-flash-high",
+    "aimodel2:0:1",
+    "aimodel3:-1:0",
+    "aimodel3:0:99",
+    "aimodel3:9007199254740992:0",
+    "aimodel3:1:0junk",
   ].forEach((data) => assertEquals(parseModelCallback(data), undefined));
 });
 
 Deno.test("Argon is appended to model choices and uses medium Interactions despite explicit cache settings", async () => {
   const index = MODEL_OPTIONS.findIndex((option) => option.model === "gemini-4-argon");
-  assertEquals(index, 7);
-  assertEquals(parseModelCallback(`aimodel2:9:${index}`)?.option.provider, "gemini");
+  assertEquals(index, 6);
+  assertEquals(parseModelCallback(`aimodel3:9:${index}`)?.option.provider, "gemini");
   const mock = intercepted(() => json(interactionResponse()));
   const first = await mock.generate(request([user()], {
     model: "gemini-4-argon",
@@ -700,10 +778,10 @@ Deno.test("latest DeepSeek imports old Chat history portably and Pro exposes the
 Deno.test("latest Flash supports images and retired menu slots retain stable callback indexes", async () => {
   assertEquals(supportsImages("deepseek", "deepseek-flash"), true);
   assertEquals(supportsImages("deepseek", "deepseek-v4-pro"), false);
-  for (const index of [4, 5, 6]) {
-    assertEquals(parseModelCallback(`aimodel2:9:${index}`)?.option.model, "deepseek-flash");
+  for (const index of [3, 4, 5]) {
+    assertEquals(parseModelCallback(`aimodel3:9:${index}`)?.option.model, "deepseek-flash");
   }
-  assertEquals(parseModelCallback("aimodel2:9:7")?.option.model, "gemini-4-argon");
+  assertEquals(parseModelCallback("aimodel3:9:6")?.option.model, "gemini-4-argon");
   const mock = intercepted(() => json(nativeDeepseekResponse()));
   const photo = user({
     messageType: "image",

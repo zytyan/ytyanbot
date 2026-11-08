@@ -215,8 +215,8 @@ Deno.test("window mismatch and provider/model switching require complete media r
         );
       } else {f.repository.setSessionModel(
           1,
-          change === "provider" ? "sub2api" : "gemini",
-          "gemini-3.7-flash",
+          change === "provider" ? "cliproxyapi" : "gemini",
+          "gemini-3.8-flash-high",
           2,
         );}
       await assertRejects(() => f.create().handle(f.followup), Error, "历史媒体已离线归档");

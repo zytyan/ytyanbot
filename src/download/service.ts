@@ -11,6 +11,37 @@ const DOWNLOAD_URL =
 const RESOLUTION = /\b(144|360|480|720|1080)p?\b/i;
 const decoder = new TextDecoder();
 
+// Helper output may contain account data and signed media URLs. Retain only
+// recognized diagnostic categories and numeric upstream codes in logs/notices.
+export class BilibiliDownloadError extends Error {
+  constructor(code: number, stderr: Uint8Array) {
+    const output = decoder.decode(stderr);
+    const stages = [
+      "invalid account fields",
+      "invalid account object",
+      "invalid cookie JSON object",
+      "app playurl failed",
+      "view api failed",
+      "ffmpeg",
+      "permission denied",
+      "no such file or directory",
+      "no space left on device",
+      "unexpected eof",
+      "timeout",
+      "connection refused",
+    ].filter((stage) => output.toLowerCase().includes(stage));
+    const upstream = output.match(/(?:code["']?\s*[:=]\s*|HTTP\s+)(-?\d{1,6})\b/i)?.[1];
+    super(
+      output.toLowerCase().includes("no space left on device")
+        ? "下载失败：服务器下载目录空间不足，请联系管理员释放空间。"
+        : `B站下载工具失败（退出码 ${code}${stages.length ? `；${stages.join(" / ")}` : ""}${
+          upstream ? `；上游状态 ${upstream}` : ""
+        }），请稍后重试或联系管理员检查下载工具及登录状态。`,
+    );
+    this.name = "BilibiliDownloadError";
+  }
+}
+
 export interface DownloadKey {
   readonly url: string;
   readonly audioOnly: boolean;
@@ -169,6 +200,7 @@ export class DownloadService {
     readonly process: ProcessRunner,
     readonly fetcher: typeof fetch = fetch,
     readonly cookieFile: () => Promise<string> = findBilibiliCookies,
+    readonly temporaryRoot?: string,
   ) {}
 
   async deliver(input: DeliveryRequest): Promise<SentMessage> {
@@ -318,7 +350,8 @@ file_id=excluded.file_id,title=excluded.title,description=excluded.description,u
   }
 
   async #download(key: DownloadKey, signal?: AbortSignal): Promise<Downloaded> {
-    const temporary = await Deno.makeTempDir({ prefix: "ytdlp-" });
+    if (this.temporaryRoot) await Deno.mkdir(this.temporaryRoot, { recursive: true, mode: 0o700 });
+    const temporary = await Deno.makeTempDir({ dir: this.temporaryRoot, prefix: "ytdlp-" });
     try {
       if (key.url.includes("bilibili.com") || key.url.includes("b23.tv")) {
         const cookies = await this.cookieFile();
@@ -331,7 +364,9 @@ file_id=excluded.file_id,title=excluded.title,description=excluded.description,u
           this.#bilibiliInfo(key.url, signal),
         ]);
         if (result.status === "rejected") throw result.reason;
-        if (result.value.code !== 0) throw new Error(`bbdown-go 下载失败 (${result.value.code})`);
+        if (result.value.code !== 0) {
+          throw new BilibiliDownloadError(result.value.code, result.value.stderr);
+        }
         const info = metadata.status === "fulfilled"
           ? metadata.value
           : { title: "未知标题", uploader: "未知上传者", description: "" };

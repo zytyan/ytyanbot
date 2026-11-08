@@ -140,7 +140,7 @@ Deno.test("management replies and input errors are private; successful tools rem
         assertEquals(body.blocks.slice(1).every((b) => b.type === "buttons"), true);
         assertEquals(
           body.blocks[1]!.buttons![0]!.callback_data.startsWith(
-            command === "/chat_config" ? "gcfg:" : "aimodel2:",
+            command === "/chat_config" ? "gcfg:" : "aimodel3:",
           ),
           true,
         );
@@ -258,7 +258,7 @@ Deno.test("suspend is owner-only, reply-targeted, durable, and always private in
 Deno.test("native rich management buttons edit the whole body and retain ephemeral identity", async () => {
   const f = await fixture();
   try {
-    await f.app.bot.handleUpdate(f.callback("aimodel2:0:0", f.menu(true, 7, true)));
+    await f.app.bot.handleUpdate(f.callback("aimodel3:0:0", f.menu(true, 7, true)));
     const model = f.calls.find((c) => c.method === "editEphemeralMessageText")!;
     assertEquals(model.payload.ephemeral_message_id, 51);
     assertEquals(model.payload.receiver_user_id, 7);
@@ -335,10 +335,10 @@ Deno.test("private model and config menus use dedicated edits, verify receiver a
   try {
     const repository = new AiRepository(f.db);
     const original = repository.getSelection(-100);
-    await f.app.bot.handleUpdate(f.callback("aimodel2:0:0", f.menu(true, 8)));
+    await f.app.bot.handleUpdate(f.callback("aimodel3:0:0", f.menu(true, 8)));
     assertEquals(repository.getSelection(-100), original);
     assertStringIncludes(String(f.calls.at(-1)!.payload.text), "不属于你");
-    await f.app.bot.handleUpdate(f.callback("aimodel2:0:0"));
+    await f.app.bot.handleUpdate(f.callback("aimodel3:0:0"));
     const edit = f.calls.find((c) => c.method === "editEphemeralMessageText")!;
     assertEquals(edit.payload.ephemeral_message_id, 51);
     assertEquals(edit.payload.receiver_user_id, 7);
@@ -352,7 +352,7 @@ Deno.test("private model and config menus use dedicated edits, verify receiver a
     await f.app.bot.handleUpdate(f.callback("gcfg:auto_calculate:T", f.menu(false)));
     assertEquals(new StatsService(f.db).config(-100).autoCalculate, false);
     assertEquals(f.calls.some((c) => c.method === "editMessageReplyMarkup"), true);
-    await f.app.bot.handleUpdate(f.callback("aimodel2:0:0", f.menu(false)));
+    await f.app.bot.handleUpdate(f.callback("aimodel3:0:0", f.menu(false)));
     assertEquals(f.calls.some((c) => c.method === "editMessageText"), true);
     // Receiver identity is not an administration grant.
     const update = f.callback("gcfg:auto_calculate:F");

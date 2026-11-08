@@ -36,10 +36,12 @@ Deno.test("AI activity precedes slow traditional work and a hanging reaction can
     );
   };
   try {
-    temp.db.run("INSERT INTO ai_chat_settings VALUES(-100,'sub2api','gemini-3.7-flash',0,1)");
+    temp.db.run(
+      "INSERT INTO ai_chat_settings VALUES(-100,'cliproxyapi','gemini-3.8-flash-high',0,1)",
+    );
     new StatsService(temp.db).setConfigField(-100, "auto_cvt_bili", true);
     const cfg = parseConfig(
-      `database-path: ${temp.path}\nbot-token: fake\nai-chats: [-100]\nsub2api-key: fake\n`,
+      `database-path: ${temp.path}\nbot-token: fake\nai-chats: [-100]\ncliproxyapi-key: fake\n`,
     );
     const app = await createApplication(temp.db, new ConfigStore(cfg, "unused"), (bot) => {
       bot.api.config.use((_previous, method, _payload, signal) => {

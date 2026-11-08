@@ -1,5 +1,6 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { DownloadService } from "../../src/download/service.ts";
+import { dirname } from "node:path";
 import { FakeTelegram, FakeYoutubeRunner, temporaryDatabase } from "./helpers.ts";
 
 Deno.test("same download runs and uploads once while every requester receives media", async () => {
@@ -33,6 +34,7 @@ Deno.test("same download runs and uploads once while every requester receives me
 Deno.test("Bilibili audio uses account JSON and survives optional metadata failure", async () => {
   const temporary = await temporaryDatabase();
   const telegram = new FakeTelegram();
+  const temporaryRoot = `${dirname(temporary.path)}/downloads`;
   let workDir = "";
   const runner = {
     async run(command: string, args: readonly string[], options: { cwd?: string }) {
@@ -56,6 +58,7 @@ Deno.test("Bilibili audio uses account JSON and survives optional metadata failu
       runner,
       fetcher,
       () => Promise.resolve("/account.json"),
+      temporaryRoot,
     );
     await service.deliver({
       key: { url: "https://bilibili.com/video/BV1", audioOnly: true, resolution: 0 },
@@ -65,6 +68,7 @@ Deno.test("Bilibili audio uses account JSON and survives optional metadata failu
       userName: "A",
     });
     assertEquals(telegram.calls.filter((call) => call.method === "audio").length, 1);
+    assertEquals(dirname(workDir), temporaryRoot);
     await assertRejects(() => Deno.stat(workDir), Deno.errors.NotFound);
   } finally {
     await temporary.close();
@@ -145,7 +149,20 @@ Deno.test("Bilibili downloads reach local API as file URIs and cache only after 
       };
       await service.deliver(input);
       await assertRejects(() => Deno.stat(paths.at(-1)!), Deno.errors.NotFound);
-      await service.deliver(input);
+      assertEquals(
+        temporary.db.get<{ file_id: string }>(
+          "SELECT file_id FROM yt_dl_results WHERE audio_only=?",
+          audioOnly ? 1 : 0,
+        )?.file_id,
+        `cached-${audioOnly ? "audio" : "video"}`,
+      );
+      // A fresh service must reuse the persisted ID even after local media is gone.
+      const restarted = new DownloadService(temporary.db, gateway, {
+        run() {
+          throw new Error("cached delivery must not invoke download or probe helpers");
+        },
+      });
+      await restarted.deliver(input);
     }
     assertEquals(downloads, 2);
     assertEquals(uploads, 2);
@@ -153,6 +170,52 @@ Deno.test("Bilibili downloads reach local API as file URIs and cache only after 
       temporary.db.all("SELECT file_id,upload_count FROM yt_dl_results ORDER BY audio_only"),
       [{ file_id: "cached-video", upload_count: 1 }, { file_id: "cached-audio", upload_count: 1 }],
     );
+  } finally {
+    await temporary.close();
+  }
+});
+
+Deno.test("Bilibili helper failure leaves no cache or upload and cleans temporary files", async () => {
+  const { BilibiliDownloadError } = await import("../../src/download/service.ts");
+  const temporary = await temporaryDatabase();
+  const telegram = new FakeTelegram();
+  const temporaryRoot = `${dirname(temporary.path)}/downloads`;
+  let workDir = "";
+  const runner = {
+    run(_command: string, _args: readonly string[], options: { cwd?: string }) {
+      workDir = options.cwd!;
+      return Promise.resolve({
+        code: 1,
+        stdout: new Uint8Array(),
+        stderr: new TextEncoder().encode("all candidates failed: no space left on device"),
+      });
+    },
+  };
+  try {
+    const service = new DownloadService(
+      temporary.db,
+      telegram,
+      runner,
+      () => Promise.reject(new Error("metadata unavailable")),
+      () => Promise.resolve("/account.json"),
+      temporaryRoot,
+    );
+    await assertRejects(
+      () =>
+        service.deliver({
+          key: { url: "https://bilibili.com/video/BV1", audioOnly: false, resolution: 720 },
+          chatId: -100,
+          messageId: 1,
+          userId: 1,
+          userName: "A",
+        }),
+      BilibiliDownloadError,
+      "服务器下载目录空间不足",
+    );
+    assertEquals(dirname(workDir), temporaryRoot);
+    assertEquals(temporary.db.all("SELECT * FROM yt_dl_results"), []);
+    assertEquals(telegram.calls.filter((call) => call.method === "video").length, 0);
+    await assertRejects(() => Deno.stat(workDir), Deno.errors.NotFound);
   } finally {
     await temporary.close();
   }

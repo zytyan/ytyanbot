@@ -7,9 +7,10 @@ import type { AiRequest, AiResult, ProviderState } from "./types.ts";
 import {
   MODEL_DEEPSEEK_FLASH,
   MODEL_DEEPSEEK_PRO,
-  MODEL_GEMINI_37_FLASH,
+  MODEL_GEMINI_38_FLASH,
   MODEL_GEMINI_ARGON,
   MODEL_GEMINI_FLASH,
+  MODEL_SONNET_46,
 } from "./types.ts";
 import {
   type ApiMode,
@@ -44,18 +45,26 @@ export function createAiGenerator(
         : AbortSignal.timeout(15 * 60_000),
     };
     const settings = config();
-    if (!["gemini", "sub2api", "deepseek"].includes(request.provider)) {
+    if (!["gemini", "cliproxyapi", "deepseek"].includes(request.provider)) {
       throw new Error(`unsupported AI provider: ${request.provider}`);
+    }
+    if (
+      request.provider === "cliproxyapi" &&
+      ![MODEL_SONNET_46, MODEL_GEMINI_38_FLASH].includes(request.model)
+    ) {
+      throw new Error(`unsupported CLIProxyAPI model: ${request.model}`);
     }
     const key = request.provider === "deepseek"
       ? settings.deepSeekKey
-      : request.provider === "sub2api"
-      ? settings.sub2apiKey
+      : request.provider === "cliproxyapi"
+      ? settings.cliproxyapiKey
       : settings.geminiKey;
     if (!key) throw new Error(`${request.provider} API Key 未配置`);
     const last = request.messages.at(-1);
     if (
-      request.provider === "deepseek" && !last?.text &&
+      (request.provider === "deepseek" ||
+        (request.provider === "cliproxyapi" && request.model === MODEL_SONNET_46)) &&
+      !last?.text &&
       (last?.messageType === "video" || last?.messageType === "animation")
     ) {
       throw new Error("当前模型不处理视频");
@@ -118,15 +127,20 @@ export function createAiGenerator(
       const google = createGoogle({
         apiKey: key,
         fetch: capture,
-        ...(request.provider === "sub2api" ? { baseURL: settings.sub2apiBaseUrl } : {}),
+        ...(request.provider === "cliproxyapi"
+          ? { baseURL: `${settings.cliproxyapiBaseUrl}/v1beta` }
+          : {}),
         ...(mode === "interactions" ? { headers: { "Api-Revision": "2026-05-20" } } : {}),
       });
       const deepseekNative = mode === "deepseek-anthropic";
+      const anthropic = deepseekNative || mode === "anthropic";
       // Direct exported SDK instance avoids the default factory's import-time environment reads.
-      const model = deepseekNative
+      const model = anthropic
         ? new AnthropicLanguageModel(request.model, {
-          provider: "deepseek.anthropic",
-          baseURL: settings.deepSeekBaseUrl.replace(/\/v1$/, "") + "/anthropic/v1",
+          provider: deepseekNative ? "deepseek.anthropic" : "cliproxyapi.anthropic",
+          baseURL: deepseekNative
+            ? settings.deepSeekBaseUrl.replace(/\/v1$/, "") + "/anthropic/v1"
+            : `${settings.cliproxyapiBaseUrl}/v1`,
           headers: {
             "x-api-key": key,
             authorization: `Bearer ${key}`,
@@ -140,11 +154,7 @@ export function createAiGenerator(
         )
         : mode === "interactions"
         ? google.interactions(request.model)
-        : google(
-          request.provider === "sub2api" && request.model === MODEL_GEMINI_37_FLASH
-            ? "gemini-3.7-flash-tiered"
-            : request.model,
-        );
+        : google(request.model);
       const result = await generateText({
         model,
         messages: latencySyncStage("provider.history.build", () =>
@@ -160,10 +170,10 @@ export function createAiGenerator(
         maxRetries: 0,
         abortSignal: request.signal,
         include: { responseBody: true },
-        maxOutputTokens: deepseekNative ? 32768 : undefined,
+        maxOutputTokens: anthropic ? 32768 : undefined,
         tools: deepseekNative
           ? { web_search: anthropicTools.webSearch_20250305({ maxUses: 3 }) }
-          : mode === "deepseek" || state.geminiCacheName
+          : mode === "anthropic" || mode === "deepseek" || state.geminiCacheName
           ? undefined
           : {
             google_search: google.tools.googleSearch({}),
@@ -171,7 +181,7 @@ export function createAiGenerator(
               ? { code_execution: google.tools.codeExecution({}) }
               : {}),
           },
-        providerOptions: deepseekNative
+        providerOptions: anthropic
           ? undefined
           : mode === "deepseek"
           ? { deepseek: { thinking: { type: "enabled" } } }
@@ -214,7 +224,7 @@ export function createAiGenerator(
       }
       const candidates = native.candidates as { content?: Record<string, unknown> }[] | undefined;
       const choices = native.choices as { message?: Record<string, unknown> }[] | undefined;
-      const nativeAssistant = deepseekNative
+      const nativeAssistant = anthropic
         ? native.content
         : mode === "deepseek"
         ? choices?.[0]?.message
@@ -312,7 +322,9 @@ export function createAiGenerator(
           : "deepseek",
       );
     }
-    if (request.provider === "sub2api") return await call("generateContent");
+    if (request.provider === "cliproxyapi") {
+      return await call(request.model === MODEL_SONNET_46 ? "anthropic" : "generateContent");
+    }
     const rebuildInteractions = async (): Promise<AiResult> => {
       try {
         return await call("interactions");

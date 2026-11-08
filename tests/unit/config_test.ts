@@ -21,17 +21,17 @@ ocr:
   assertEquals(config.contentModerator.accountId, "cloudflare-account");
   assertEquals(config.telegramApiUrl, "https://api.telegram.org");
   assertEquals(config.deepSeekBaseUrl, "https://api.deepseek.com");
-  assertEquals(config.sub2apiKey, "");
-  assertEquals(config.sub2apiBaseUrl, "http://127.0.0.1:18080/antigravity/v1beta");
+  assertEquals(config.cliproxyapiKey, "");
+  assertEquals(config.cliproxyapiBaseUrl, "http://127.0.0.1:8317");
 });
 
-Deno.test("Sub2API native base URL and credential are independently configured", () => {
+Deno.test("CLIProxyAPI native base URL and credential are independently configured", () => {
   const config = parseConfig(`database-path: /tmp/test.db
 gemini-key: official-key
-sub2api-key: proxy-key
-sub2api-base-url: https://proxy.example/antigravity/v1beta/
+cliproxyapi-key: proxy-key
+cliproxyapi-base-url: https://proxy.example/
 `);
   assertEquals(config.geminiKey, "official-key");
-  assertEquals(config.sub2apiKey, "proxy-key");
-  assertEquals(config.sub2apiBaseUrl, "https://proxy.example/antigravity/v1beta");
+  assertEquals(config.cliproxyapiKey, "proxy-key");
+  assertEquals(config.cliproxyapiBaseUrl, "https://proxy.example");
 });

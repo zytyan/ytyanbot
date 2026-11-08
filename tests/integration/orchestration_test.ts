@@ -58,9 +58,11 @@ Deno.test("Go-compatible bot replies trigger AI after traditional commands; fact
   };
   try {
     const cfg = parseConfig(
-      `database-path: ${temporary.path}\nbot-token: fake\nai-chats: [-100]\nsub2api-key: fake\n`,
+      `database-path: ${temporary.path}\nbot-token: fake\nai-chats: [-100]\ncliproxyapi-key: fake\n`,
     );
-    temporary.db.run("INSERT INTO ai_chat_settings VALUES(-100,'sub2api','gemini-3.7-flash',0,1)");
+    temporary.db.run(
+      "INSERT INTO ai_chat_settings VALUES(-100,'cliproxyapi','gemini-3.8-flash-high',0,1)",
+    );
     const app = await createApplication(
       temporary.db,
       new ConfigStore(cfg, "unused"),

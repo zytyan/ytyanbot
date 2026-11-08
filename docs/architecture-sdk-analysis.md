@@ -149,3 +149,27 @@ createAiGenerator 中的 Vercel generateText 调用 DeepSeek Anthropic 兼容 Me
 web_search，具体协议重建、SDK 最小权限与真实验收见
 [DeepSeek 搜索接入](deepseek-search.md)。继续保留旧 DeepSeek Chat/native 重放路径和历史数据，
 不引入搜索框架、Agent 或新服务账号。
+
+## 2026-11-07：移除 Sub2API，增加 CPA
+
+检查基线：`3ef4c3801eaf3d05e608c1f587ebee5b504504fa`（TypeScript master）。 本节取代上文 Sub2API
+的运行时接口约定；历史记录和导入 payload 不改写或删除。
+
+- 原有官方 Gemini、DeepSeek 菜单保留，仅删除 Sub2API 入口；新菜单版本为 `aimodel3`，
+  旧版本要求重新打开，防止索引变化导致选择错误模型。
+- `cliproxyapi` 为独立 provider，配置服务根地址和独立 key。仅开放 `claude-sonnet-4-6` /
+  `gemini-3.8-flash-high`，显示名均带 `CPA`。
+- 直接使用现有 Anthropic/Google SDK：分别走 `/v1/messages`、
+  `/v1beta/models/gemini-3.8-flash-high:generateContent`，不新增 provider 层。
+- Claude 使用 `anthropic` 协议标签，保留 SDK 消息、providerOptions 和必要 native content； Gemini
+  使用 `generateContent` 标签，保留签名和工具 payload。CPA 不使用官方 cache/Interactions。
+- 保持总计 15 分钟、最多五次生成、SDK maxRetries=0 及原有持久化/投递事务。
+- CLIProxyAPI
+  路由依据：[上游路由源码](https://github.com/router-for-me/CLIProxyAPI/blob/main/internal/api/server.go)。
+  离线回归不等于已验证真实代理中的模型可用性。
+
+2026-11-07 内部 CPA 联调：`/v1/models` 实际发布 `claude-sonnet-4-6` 与 `gemini-3.8-flash-high`，因此
+Gemini 使用后者精确 ID，显示名仍为 `Gemini 3.8 Flash（CPA）`。 两个模型各通过两轮真实 SDK
+生成，验证独立凭证、协议、SDK payload 续聊及用量统计，未发送 Telegram 测试消息。Sonnet
+两轮输入/输出分别为 49/4、87/4；Gemini 为 48/112、409/113， Gemini 输出已包含
+reasoning，不额外累加。完整离线回归为 112 项 unit、61 项 integration。

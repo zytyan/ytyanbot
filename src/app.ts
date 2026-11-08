@@ -1,5 +1,6 @@
 import { run, type RunnerHandle } from "@grammyjs/runner";
 import { Bot, Context } from "grammy";
+import { dirname, resolve } from "node:path";
 import type { InlineKeyboardMarkup, InlineQueryResult, Message, PhotoSize } from "grammy/types";
 import { AiRepository } from "./ai/repository.ts";
 import {
@@ -19,7 +20,7 @@ import {
   hasBilibiliVideo,
   parseBilibiliInlineId,
 } from "./download/bilibili.ts";
-import { DownloadService, parseDownloadKey } from "./download/service.ts";
+import { BilibiliDownloadError, DownloadService, parseDownloadKey } from "./download/service.ts";
 import { type NsfwPhoto, NsfwService } from "./nsfw/service.ts";
 import { DenoProcessRunner } from "./shared/process.ts";
 import { toolHandlers } from "./features/tool_handlers.ts";
@@ -225,7 +226,7 @@ function modelKeyboard(
       text: `${
         option.model === current && option.provider === provider ? "✅ " : ""
       }${option.label}`,
-      callback_data: `aimodel2:${sessionId}:${index}`,
+      callback_data: `aimodel3:${sessionId}:${index}`,
     }]),
   };
 }
@@ -286,7 +287,14 @@ export async function createApplication(
     () => configs.value,
     { id: identity.id, firstName: identity.first_name, username: identity.username },
   );
-  const downloads = new DownloadService(db, telegram, new DenoProcessRunner());
+  const downloads = new DownloadService(
+    db,
+    telegram,
+    new DenoProcessRunner(),
+    fetch,
+    undefined,
+    resolve(dirname(initial.databasePath), "downloads"),
+  );
   const nsfw = new NsfwService(
     db,
     telegram,
@@ -644,7 +652,7 @@ export async function createApplication(
     } catch (error) {
       logger("download").warn("download failed", error);
       await currentInteraction(ctx).notice(
-        error instanceof BilibiliLinkError
+        (error instanceof BilibiliLinkError || error instanceof BilibiliDownloadError)
           ? error.message
           : "下载失败，请检查链接或稍后重新发起请求。",
       );
@@ -898,7 +906,7 @@ export async function createApplication(
       stats.increment(chatId, "download_video");
     } catch (error) {
       logger("download").warn("callback download failed", error);
-      const text = error instanceof BilibiliLinkError
+      const text = (error instanceof BilibiliLinkError || error instanceof BilibiliDownloadError)
         ? error.message
         : "下载失败，请检查链接或稍后重新发起请求。";
       if (ctx.chat) await replyPrivately(ctx, text);
@@ -943,7 +951,7 @@ export async function createApplication(
     }
     if (
       "ephemeral_message_id" in message && message.ephemeral_message_id &&
-      !data.startsWith("aimodel2:") && !data.startsWith("gcfg:")
+      !data.startsWith("aimodel3:") && !data.startsWith("gcfg:")
     ) {
       return await ctx.answerCallbackQuery({
         text: "此临时菜单操作不受支持，请重新打开。",
@@ -959,13 +967,13 @@ export async function createApplication(
       );
       return;
     }
-    if (data.startsWith("aimodel:")) {
+    if (data.startsWith("aimodel:") || data.startsWith("aimodel2:")) {
       return await ctx.answerCallbackQuery({
         text: "模型菜单已更新，请重新使用 /model",
         show_alert: true,
       });
     }
-    if (data.startsWith("aimodel2:")) {
+    if (data.startsWith("aimodel3:")) {
       if (!await canAdminister(ctx, configs.value.god)) {
         return await ctx.answerCallbackQuery({
           text: "只有群主或管理员可以切换模型",
@@ -979,8 +987,11 @@ export async function createApplication(
       if (option.provider === "deepseek" && !configs.value.deepSeekKey) {
         return await ctx.answerCallbackQuery({ text: "DeepSeek API Key 未配置", show_alert: true });
       }
-      if (provider === "sub2api" && !configs.value.sub2apiKey) {
-        return await ctx.answerCallbackQuery({ text: "Sub2API API Key 未配置", show_alert: true });
+      if (provider === "cliproxyapi" && !configs.value.cliproxyapiKey) {
+        return await ctx.answerCallbackQuery({
+          text: "CLIProxyAPI API Key 未配置",
+          show_alert: true,
+        });
       }
       if (provider === "gemini" && !configs.value.geminiKey) {
         return await ctx.answerCallbackQuery({ text: "Gemini API Key 未配置", show_alert: true });

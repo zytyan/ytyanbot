@@ -65,14 +65,17 @@ export YTYAN_CONFIG_FILE=/opt/tgbots/ytyanbot/run/test-config.yaml
 ```
 
 支持 Go 版 YAML 字段，以及 `YTYAN_DATABASE_PATH`、`YTYAN_AI_MEDIA_PATH`、
-`YTYAN_BOT_TOKEN`、`GEMINI_API_KEY`、`SUB2API_API_KEY`、`SUB2API_BASE_URL`、 `DEEPSEEK_API_KEY`
-覆盖。Bot token、Telegram API URL、数据库和媒体路径改变后必须重启； 白名单、provider key、NSFW
-和日志配置可热重载，无效配置保留旧快照。
+`YTYAN_BOT_TOKEN`、`GEMINI_API_KEY`、`CLIPROXYAPI_API_KEY`、`CLIPROXYAPI_BASE_URL`、
+`DEEPSEEK_API_KEY` 覆盖。Bot token、Telegram API URL、数据库和媒体路径改变后必须重启；
+白名单、provider key、NSFW 和日志配置可热重载，无效配置保留旧快照。
 
-模型选择同时保存 provider/model；相同 `gemini-3.7-flash` 可选官方或 Sub2API。 Sub2API 使用独立
-`sub2api-key`/`sub2api-base-url`，仅走原生 antigravity generateContent，映射到
-`gemini-3.7-flash-tiered`，不复用官方缓存或 Interactions。实验 DeepSeek 选项只表示能力目标，
-不保证该模型当前仍向账号开放。
+模型选择同时保存 provider/model；原有官方 Gemini、DeepSeek 选项保留，Sub2API 已移除。 CLIProxyAPI
+仅增加 `Claude Sonnet 4.6（CPA）`（`claude-sonnet-4-6`）和
+`Gemini 3.8 Flash（CPA）`（`gemini-3.8-flash-high`）。配置独立的 `cliproxyapi-key` 和
+`cliproxyapi-base-url`（服务根地址，默认 `http://127.0.0.1:8317`，不含 `/v1` 或 `/v1beta`）； Sonnet
+使用 `/v1/messages`，Gemini 使用 `/v1beta/models/...:generateContent`，不复用官方 Gemini 缓存或
+Interactions。旧模型菜单需要重新使用 `/model` 打开。历史 Sub2API 数据保留，
+旧会话需先切换到可用模型再继续。代理中的模型 ID/别名需与上述 ID 一致。
 
 `gemini-explicit-cache: true` 的新官方会话使用原生生成；稳定上下文至少 4096 tokens、
 最近稳定消息至少五分钟前时才尝试创建 900 秒缓存。复用检查内容/提示词/模型/tools 指纹；
@@ -81,8 +84,9 @@ export YTYAN_CONFIG_FILE=/opt/tgbots/ytyanbot/run/test-config.yaml
 兼容性错误才回退原生路径。
 
 直接调用现有供应商，不经过 Vercel AI Gateway，也不改变现有计费渠道。 SDK
-自动重试关闭；每次生成总期限 180 秒，仅明确的缓存失效/远端链失效/接口不兼容有有限回退。 原字节
-provider 响应、native assistant 与含 providerOptions 的 SDK messages 均持久化； 输出 token 已包含
+自动重试关闭；每次生成总期限 15
+分钟，瞬时错误重试与缓存失效/远端链失效/接口不兼容恢复共享最多五次生成尝试。 原字节 provider
+响应、native assistant 与含 providerOptions 的 SDK messages 均持久化； 输出 token 已包含
 reasoning，不再次相加。发送失败使用已存结果重发，不重新请求模型。
 
 CLI：
@@ -129,8 +133,8 @@ deno task compile
 - SIGINT 可停止 runner、关闭配置 watcher 并 flush 后以状态 0 退出
 
 真实 Go 配置已用于 Telegram 身份/本地文件、官方 Gemini 原生/Interactions 与 DeepSeek 小请求验证。
-Sub2API 模型列表可用，但当前 tiered 生成返回 404；用户已确认保留配置并继续切换。
-默认测试全部拦截外部 API，不使用生产配置。
+CPA 已通过内部代理的真实两轮续聊验证（Sonnet 4.6、Gemini 3.8 Flash High）， 验证原生协议、历史
+payload 和用量统计。默认测试全部拦截外部 API，不使用生产配置。
 
 ## 相册与运维
 

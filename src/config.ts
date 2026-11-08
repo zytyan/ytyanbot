@@ -31,8 +31,8 @@ const rawConfigSchema = z.object({
   "ai-media-path": z.string().optional(),
   "gemini-key": z.string().default(""),
   "gemini-explicit-cache": z.boolean().default(true),
-  "sub2api-key": z.string().default(""),
-  "sub2api-base-url": z.string().url().default("http://127.0.0.1:18080/antigravity/v1beta"),
+  "cliproxyapi-key": z.string().default(""),
+  "cliproxyapi-base-url": z.string().url().default("http://127.0.0.1:8317"),
   "deepseek-key": z.string().default(""),
   "deepseek-base-url": z.string().url().default("https://api.deepseek.com"),
 }).passthrough();
@@ -57,8 +57,8 @@ export interface AppConfig {
   readonly aiMediaPath: string;
   readonly geminiKey: string;
   readonly geminiExplicitCache: boolean;
-  readonly sub2apiKey: string;
-  readonly sub2apiBaseUrl: string;
+  readonly cliproxyapiKey: string;
+  readonly cliproxyapiBaseUrl: string;
   readonly deepSeekKey: string;
   readonly deepSeekBaseUrl: string;
 }
@@ -105,8 +105,11 @@ export function parseConfig(text: string): AppConfig {
       `${databaseDirectory}/ai-media`,
     geminiKey: env("GEMINI_API_KEY") ?? raw["gemini-key"],
     geminiExplicitCache: raw["gemini-explicit-cache"],
-    sub2apiKey: env("SUB2API_API_KEY") ?? raw["sub2api-key"],
-    sub2apiBaseUrl: (env("SUB2API_BASE_URL") ?? raw["sub2api-base-url"]).replace(/\/$/, ""),
+    cliproxyapiKey: env("CLIPROXYAPI_API_KEY") ?? raw["cliproxyapi-key"],
+    cliproxyapiBaseUrl: (env("CLIPROXYAPI_BASE_URL") ?? raw["cliproxyapi-base-url"]).replace(
+      /\/$/,
+      "",
+    ),
     deepSeekKey: env("DEEPSEEK_API_KEY") ?? raw["deepseek-key"],
     deepSeekBaseUrl: raw["deepseek-base-url"].replace(/\/$/, ""),
   });

@@ -38,7 +38,7 @@
     "test:unit": "deno test --allow-sys=hostname tests/unit",
     "test:integration": "deno test --allow-sys=hostname --allow-read --allow-write --allow-env tests/integration",
     "test": "deno task test:unit && deno task test:integration",
-    "compile": "deno compile --target x86_64-unknown-linux-gnu --output dist/ytyanbot-linux-x86_64 --allow-sys=hostname,inspector --allow-env=YTYAN_CONFIG_FILE,YTYAN_DATABASE_PATH,YTYAN_AI_MEDIA_PATH,YTYAN_BOT_TOKEN,GEMINI_API_KEY,SUB2API_API_KEY,SUB2API_BASE_URL,DEEPSEEK_API_KEY,TZ,BOT_INNER_HTTP,GOYTYAN_BACKUP_TOKEN,GOYTYAN_BACKUP_MAX_DURATION --allow-net --allow-read=/opt/tgbots/telegram-bot-api,/opt/tgbots/ytyanbot/src/assets,/opt/tgbots/ytyanbot/build,/opt/tgbots/ytyanbot/run,/tmp --allow-write=/opt/tgbots/ytyanbot/run,/tmp --include=src/assets --allow-run=/usr/bin/tar,/usr/bin/ffmpeg,/usr/local/bin/yt-dlp,/usr/bin/bbdown-go,/usr/bin/ffprobe src/main.ts",
+    "compile": "deno compile --target x86_64-unknown-linux-gnu --output dist/ytyanbot-linux-x86_64 --allow-sys=hostname,inspector --allow-env=YTYAN_CONFIG_FILE,YTYAN_DATABASE_PATH,YTYAN_AI_MEDIA_PATH,YTYAN_BOT_TOKEN,GEMINI_API_KEY,CLIPROXYAPI_API_KEY,CLIPROXYAPI_BASE_URL,DEEPSEEK_API_KEY,TZ,BOT_INNER_HTTP,GOYTYAN_BACKUP_TOKEN,GOYTYAN_BACKUP_MAX_DURATION --allow-net --allow-read=/opt/tgbots/telegram-bot-api,/opt/tgbots/ytyanbot/src/assets,/opt/tgbots/ytyanbot/build,/opt/tgbots/ytyanbot/run,/tmp --allow-write=/opt/tgbots/ytyanbot/run,/tmp --include=src/assets --allow-run=/usr/bin/tar,/usr/bin/ffmpeg,/usr/local/bin/yt-dlp,/usr/bin/bbdown-go,/usr/bin/ffprobe src/main.ts",
     "db:generate": "deno run --allow-read=sql,src/db --allow-write=src/db --allow-run scripts/generate_sql.ts",
     "db:verify": "deno task db:generate --check"
   }

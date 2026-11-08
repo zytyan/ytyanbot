@@ -57,9 +57,9 @@ Deno.test("SDK result survives Telegram failure; redelivery neither calls model 
   const temporary = await temporaryDatabase();
   try {
     const repository = new AiRepository(temporary.db);
-    repository.setChatModel(-100, "sub2api", "gemini-3.7-flash", 1);
+    repository.setChatModel(-100, "cliproxyapi", "gemini-3.8-flash-high", 1);
     const config = parseConfig(
-      `database-path: ${temporary.path}\nai-chats: [-100]\nsub2api-key: mock-key\n`,
+      `database-path: ${temporary.path}\nai-chats: [-100]\ncliproxyapi-key: mock-key\n`,
     );
     let providerCalls = 0;
     const generate = createAiGenerator(() => config, () => {
@@ -124,8 +124,8 @@ Deno.test("SDK result survives Telegram failure; redelivery neither calls model 
         "SELECT provider,model,SUM(input_tokens) AS total_input_tokens,SUM(output_tokens) AS total_output_tokens,SUM(cached_input_tokens) AS total_cached_input_tokens FROM ai_runs",
       ),
       {
-        provider: "sub2api",
-        model: "gemini-3.7-flash",
+        provider: "cliproxyapi",
+        model: "gemini-3.8-flash-high",
         total_input_tokens: 11,
         total_output_tokens: 5,
         total_cached_input_tokens: 4,
@@ -136,7 +136,7 @@ Deno.test("SDK result survives Telegram failure; redelivery neither calls model 
       message_id: 10,
       allow_sending_without_reply: true,
     });
-    assertEquals(repository.findSessionByMessage(-100, 100)?.provider, "sub2api");
+    assertEquals(repository.findSessionByMessage(-100, 100)?.provider, "cliproxyapi");
   } finally {
     await temporary.close();
   }

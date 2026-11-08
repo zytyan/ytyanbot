@@ -1,8 +1,13 @@
 import type { ModelMessage } from "ai";
 import type { AiMessage, AiProviderName, AiRequest } from "./types.ts";
-import { supportsImages } from "./types.ts";
+import { MODEL_SONNET_46, supportsImages } from "./types.ts";
 
-export type ApiMode = "generateContent" | "interactions" | "deepseek" | "deepseek-anthropic";
+export type ApiMode =
+  | "generateContent"
+  | "interactions"
+  | "deepseek"
+  | "deepseek-anthropic"
+  | "anthropic";
 export const SDK_PAYLOAD_FORMAT = "vercel-ai-messages-v1";
 const decoder = new TextDecoder();
 
@@ -61,11 +66,13 @@ export function modelMessages(
       return [{ role: "assistant", content: message.text ?? "" }];
     }
     const media = message.media.filter((item) =>
-      provider !== "deepseek" ||
-      (supportsImages(provider, model) && item.mimeType.startsWith("image/"))
+      provider === "cliproxyapi" && model === MODEL_SONNET_46
+        ? item.mimeType.startsWith("image/") || item.mimeType === "application/pdf"
+        : provider !== "deepseek" ||
+          (supportsImages(provider, model) && item.mimeType.startsWith("image/"))
     );
     let text = compactText(message);
-    if (provider === "deepseek" && message.media.length > media.length) text += "\n[不支持的媒体]";
+    if (message.media.length > media.length) text += "\n[不支持的媒体]";
     return [{
       role: "user",
       content: [
@@ -117,7 +124,7 @@ export function replayLegacy(
   mode: ApiMode,
   lossy: boolean,
 ): void {
-  if (lossy || mode === "deepseek-anthropic") return;
+  if (lossy || mode === "deepseek-anthropic" || mode === "anthropic") return;
   const formats = {
     generateContent: "gemini-content-v1",
     interactions: "gemini-interaction-steps-v1",

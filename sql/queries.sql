@@ -106,3 +106,16 @@ COALESCE(SUM(cached_input_tokens),0) AS total_cached_input_tokens FROM ai_runs W
 
 -- name: UnavailableMediaCount
 SELECT COUNT(*) AS count FROM ai_message_media WHERE unavailable=1;
+
+-- name: LoadAiContextMessages
+SELECT sm.chat_id,sm.msg_id,sm.role,sm.quote_part,sm.context_only,
+m.sent_at,m.user_id,m.username,m.atable_username,m.msg_type,m.text,m.reply_to_msg_id,
+r.assistant_payload,r.assistant_payload_format
+FROM ai_session_messages sm JOIN ai_messages m ON m.chat_id=sm.chat_id AND m.msg_id=sm.msg_id
+LEFT JOIN ai_runs r ON r.response_chat_id=m.chat_id AND r.response_msg_id=m.msg_id AND r.status='delivered'
+WHERE sm.session_id=? AND (sm.context_only=0 OR ?=1)
+AND NOT EXISTS (
+ SELECT 1 FROM ai_runs failed
+ WHERE failed.session_id=sm.session_id AND failed.request_chat_id=sm.chat_id
+ AND failed.request_msg_id=sm.msg_id AND failed.status='model_failed'
+) ORDER BY sm.position;

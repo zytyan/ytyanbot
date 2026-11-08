@@ -75,3 +75,52 @@ Deno.test("AI run completion accounts tokens exactly once and delivery is atomic
     await temporary.close();
   }
 });
+
+Deno.test("failed model inputs stay stored but are excluded from subsequent context", async () => {
+  const temporary = await temporaryDatabase();
+  try {
+    const repository = new AiRepository(temporary.db);
+    const session = repository.createSession({
+      chatId: -100,
+      chatName: "group",
+      chatType: "supergroup",
+      provider: "gemini",
+      model: "gemini-3-flash-preview",
+      now: 1,
+    });
+    const begin = (messageId: number) =>
+      repository.beginRun(session.id, [{
+        message: {
+          chatId: -100,
+          messageId,
+          sentAt: 2,
+          userId: 7,
+          username: "user",
+          role: "user",
+          messageType: "text",
+          text: "question",
+          media: [],
+        },
+        mediaObjects: [],
+        contextOnly: false,
+      }], 2);
+    const good = begin(10);
+    repository.completeRun(good.id, result, 3);
+    const failed = begin(20);
+    repository.failRun(failed.id, "model_failed", new Error("INVALID_MEDIA"), 4);
+    begin(30);
+    for (const includeContext of [false, true]) {
+      assertEquals(
+        repository.loadMessages(session.id, includeContext).map((m) => m.messageId),
+        [10, 30],
+      );
+    }
+    assertEquals(repository.hasMessage(session.id, -100, 20), true);
+    assertEquals(repository.getRun(failed.id)?.status, "model_failed");
+    // Delivery failures retain a successful, billable generation and its input.
+    repository.failRun(good.id, "delivery_failed", new Error("Telegram unavailable"), 5);
+    assertEquals(repository.loadMessages(session.id).map((m) => m.messageId), [10, 30]);
+  } finally {
+    await temporary.close();
+  }
+});

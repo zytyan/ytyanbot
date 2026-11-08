@@ -217,12 +217,7 @@ ORDER BY s.updated_at DESC,sm.session_id DESC LIMIT 1`,
 
   loadMessages(sessionId: number, includeContext = false): StoredAiMessage[] {
     const rows = this.db.all<Record<string, unknown>>(
-      `SELECT sm.chat_id,sm.msg_id,sm.role,sm.quote_part,sm.context_only,
-m.sent_at,m.user_id,m.username,m.atable_username,m.msg_type,m.text,m.reply_to_msg_id,
-r.assistant_payload,r.assistant_payload_format
-FROM ai_session_messages sm JOIN ai_messages m ON m.chat_id=sm.chat_id AND m.msg_id=sm.msg_id
-LEFT JOIN ai_runs r ON r.response_chat_id=m.chat_id AND r.response_msg_id=m.msg_id AND r.status='delivered'
-WHERE sm.session_id=? AND (sm.context_only=0 OR ?=1) ORDER BY sm.position`,
+      SQL.LoadAiContextMessages,
       sessionId,
       includeContext ? 1 : 0,
     );

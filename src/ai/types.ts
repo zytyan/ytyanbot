@@ -2,6 +2,9 @@ export const MODEL_GEMINI_ARGON = "gemini-4-argon";
 export const MODEL_GEMINI_CARBON = "gemini-4-carbon";
 export const MODEL_GEMINI_FLASH = "gemini-3-flash-preview";
 export const MODEL_SONNET_46 = "claude-sonnet-4-6";
+export const MODEL_OPUS_55 = "claude-opus-5-5";
+export const isCpaClaudeModel = (model: string) =>
+  model === MODEL_SONNET_46 || model === MODEL_OPUS_55;
 export const MODEL_GEMINI_38_FLASH = "gemini-3.8-flash-high";
 export const MODEL_GEMINI_37_FLASH = "gemini-3.7-flash";
 export const MODEL_GEMINI_FLASH_LITE = "gemini-3.1-flash-lite";
@@ -129,6 +132,7 @@ export const MODEL_OPTIONS = Object.freeze([
     provider: "cliproxyapi" as const,
   },
   { model: MODEL_GEMINI_CARBON, label: "Gemini 4 Carbon", provider: "gemini" as const },
+  { model: MODEL_OPUS_55, label: "Claude Opus 5.5（CPA）", provider: "cliproxyapi" as const },
 ]);
 
 export function supportsImages(provider: AiProviderName, model: string): boolean {

@@ -5,12 +5,12 @@ import { AnthropicLanguageModel, anthropicTools } from "@ai-sdk/anthropic/intern
 import type { AppConfig } from "../config.ts";
 import type { AiRequest, AiResult, ProviderState } from "./types.ts";
 import {
+  isCpaClaudeModel,
   MODEL_DEEPSEEK_FLASH,
   MODEL_DEEPSEEK_PRO,
   MODEL_GEMINI_38_FLASH,
   MODEL_GEMINI_ARGON,
   MODEL_GEMINI_FLASH,
-  MODEL_SONNET_46,
 } from "./types.ts";
 import {
   type ApiMode,
@@ -50,7 +50,7 @@ export function createAiGenerator(
     }
     if (
       request.provider === "cliproxyapi" &&
-      ![MODEL_SONNET_46, MODEL_GEMINI_38_FLASH].includes(request.model)
+      !isCpaClaudeModel(request.model) && request.model !== MODEL_GEMINI_38_FLASH
     ) {
       throw new Error(`unsupported CLIProxyAPI model: ${request.model}`);
     }
@@ -63,7 +63,7 @@ export function createAiGenerator(
     const last = request.messages.at(-1);
     if (
       (request.provider === "deepseek" ||
-        (request.provider === "cliproxyapi" && request.model === MODEL_SONNET_46)) &&
+        (request.provider === "cliproxyapi" && isCpaClaudeModel(request.model))) &&
       !last?.text &&
       (last?.messageType === "video" || last?.messageType === "animation")
     ) {
@@ -323,7 +323,7 @@ export function createAiGenerator(
       );
     }
     if (request.provider === "cliproxyapi") {
-      return await call(request.model === MODEL_SONNET_46 ? "anthropic" : "generateContent");
+      return await call(isCpaClaudeModel(request.model) ? "anthropic" : "generateContent");
     }
     const rebuildInteractions = async (): Promise<AiResult> => {
       try {

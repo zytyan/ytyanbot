@@ -1,6 +1,6 @@
 import type { ModelMessage } from "ai";
 import type { AiMessage, AiProviderName, AiRequest } from "./types.ts";
-import { MODEL_SONNET_46, supportsImages } from "./types.ts";
+import { isCpaClaudeModel, supportsImages } from "./types.ts";
 
 export type ApiMode =
   | "generateContent"
@@ -66,7 +66,7 @@ export function modelMessages(
       return [{ role: "assistant", content: message.text ?? "" }];
     }
     const media = message.media.filter((item) =>
-      provider === "cliproxyapi" && model === MODEL_SONNET_46
+      provider === "cliproxyapi" && isCpaClaudeModel(model)
         ? item.mimeType.startsWith("image/") || item.mimeType === "application/pdf"
         : provider !== "deepseek" ||
           (supportsImages(provider, model) && item.mimeType.startsWith("image/"))

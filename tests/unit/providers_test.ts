@@ -209,52 +209,54 @@ Deno.test("CLIProxyAPI Gemini uses native route and cannot leak official credent
   assertEquals(mock.calls.length, 2);
 });
 
-Deno.test("CPA Sonnet uses Claude Messages with isolated state, images, signed replay and usage", async () => {
-  const wire = {
-    id: "msg-cpa",
-    type: "message",
-    role: "assistant",
-    model: "claude-sonnet-4-6",
-    content: [
-      { type: "thinking", thinking: "reasoning", signature: "cpa-signature" },
-      { type: "text", text: "Sonnet answer" },
-    ],
-    stop_reason: "end_turn",
-    stop_sequence: null,
-    usage: { input_tokens: 12, output_tokens: 7, cache_read_input_tokens: 4 },
-  };
-  const mock = intercepted(() => json(wire));
-  const photo = user({
-    media: [{ kind: "image", mimeType: "image/png", bytes: new Uint8Array([1, 2, 3]) }],
+for (const claudeModel of ["claude-sonnet-4-6", "claude-opus-5-5"]) {
+  Deno.test(`CPA ${claudeModel} uses Claude Messages with isolated state, images, signed replay and usage`, async () => {
+    const wire = {
+      id: "msg-cpa",
+      type: "message",
+      role: "assistant",
+      model: claudeModel,
+      content: [
+        { type: "thinking", thinking: "reasoning", signature: "cpa-signature" },
+        { type: "text", text: "Sonnet answer" },
+      ],
+      stop_reason: "end_turn",
+      stop_sequence: null,
+      usage: { input_tokens: 12, output_tokens: 7, cache_read_input_tokens: 4 },
+    };
+    const mock = intercepted(() => json(wire));
+    const photo = user({
+      media: [{ kind: "image", mimeType: "image/png", bytes: new Uint8Array([1, 2, 3]) }],
+    });
+    const selection = { provider: "cliproxyapi" as const, model: claudeModel };
+    const first = await mock.generate(request([photo], {
+      ...selection,
+      explicitCache: true,
+      state: { geminiInteractionId: "official", geminiCacheName: "cachedContents/official" },
+    }));
+    const call = mock.calls[0]!;
+    assertEquals(call.url, "https://cpa.example/v1/messages");
+    assertEquals(call.headers.get("x-api-key"), "mock-cpa");
+    assertEquals(call.headers.get("authorization"), "Bearer mock-cpa");
+    assertEquals(call.headers.get("x-goog-api-key"), null);
+    assertEquals(call.body.model, claudeModel);
+    assertEquals(call.body.tools, undefined);
+    assert(!JSON.stringify(call.body).includes("official"));
+    assert(JSON.stringify(call.body.messages).includes('"type":"image"'));
+    assertEquals(first.displayText, "Sonnet answer");
+    assertEquals(first.state, {});
+    assertEquals(first.usage.inputTokens, 16);
+    assertEquals(first.usage.outputTokens, 7);
+    assertEquals(first.usage.cachedInputTokens, 4);
+    const payload = JSON.parse(decoder.decode(first.assistantPayload));
+    assertEquals(payload.provider, "cliproxyapi");
+    assertEquals(payload.mode, "anthropic");
+    assertEquals(payload.native, wire.content);
+    await mock.generate(request([photo, assistant(first), user({ messageId: 3 })], selection));
+    assert(JSON.stringify(mock.calls[1]!.body.messages).includes("cpa-signature"));
+    assertEquals(mock.calls.length, 2);
   });
-  const selection = { provider: "cliproxyapi" as const, model: "claude-sonnet-4-6" };
-  const first = await mock.generate(request([photo], {
-    ...selection,
-    explicitCache: true,
-    state: { geminiInteractionId: "official", geminiCacheName: "cachedContents/official" },
-  }));
-  const call = mock.calls[0]!;
-  assertEquals(call.url, "https://cpa.example/v1/messages");
-  assertEquals(call.headers.get("x-api-key"), "mock-cpa");
-  assertEquals(call.headers.get("authorization"), "Bearer mock-cpa");
-  assertEquals(call.headers.get("x-goog-api-key"), null);
-  assertEquals(call.body.model, "claude-sonnet-4-6");
-  assertEquals(call.body.tools, undefined);
-  assert(!JSON.stringify(call.body).includes("official"));
-  assert(JSON.stringify(call.body.messages).includes('"type":"image"'));
-  assertEquals(first.displayText, "Sonnet answer");
-  assertEquals(first.state, {});
-  assertEquals(first.usage.inputTokens, 16);
-  assertEquals(first.usage.outputTokens, 7);
-  assertEquals(first.usage.cachedInputTokens, 4);
-  const payload = JSON.parse(decoder.decode(first.assistantPayload));
-  assertEquals(payload.provider, "cliproxyapi");
-  assertEquals(payload.mode, "anthropic");
-  assertEquals(payload.native, wire.content);
-  await mock.generate(request([photo, assistant(first), user({ messageId: 3 })], selection));
-  assert(JSON.stringify(mock.calls[1]!.body.messages).includes("cpa-signature"));
-  assertEquals(mock.calls.length, 2);
-});
+}
 
 Deno.test("CPA rejects removed and unlisted models before any provider request", async () => {
   const mock = intercepted(() => json(nativeResponse()));
@@ -608,6 +610,7 @@ Deno.test("Cancellation during provider call aborts the request without a retry"
 });
 
 Deno.test("Model callbacks distinguish equal model names and stay below Telegram's byte limit", () => {
+  assertEquals(parseModelCallback("aimodel3:9:11")?.option.model, "claude-opus-5-5");
   MODEL_OPTIONS.forEach((option, index) => {
     const data = `aimodel3:9007199254740991:${index}`;
     assert(encoder.encode(data).length <= 64);
@@ -625,6 +628,7 @@ Deno.test("Model callbacks distinguish equal model names and stay below Telegram
     [
       ["claude-sonnet-4-6", "Claude Sonnet 4.6（CPA）"],
       ["gemini-3.8-flash-high", "Gemini 3.8 Flash（CPA）"],
+      ["claude-opus-5-5", "Claude Opus 5.5（CPA）"],
     ],
   );
   [

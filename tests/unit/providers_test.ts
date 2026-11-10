@@ -637,6 +637,39 @@ Deno.test("Model callbacks distinguish equal model names and stay below Telegram
   ].forEach((data) => assertEquals(parseModelCallback(data), undefined));
 });
 
+Deno.test("Carbon menu selects official Gemini and preserves two-turn native replay", async () => {
+  assertEquals(parseModelCallback("aimodel3:9:10")?.option, {
+    model: "gemini-4-carbon",
+    label: "Gemini 4 Carbon",
+    provider: "gemini",
+  });
+  const mock = intercepted(() => json(nativeResponse()));
+  const currentUser = user({ sentAt: Math.floor(Date.now() / 1000) });
+  const first = await mock.generate(request([currentUser], {
+    model: "gemini-4-carbon",
+    explicitCache: true,
+  }));
+  await mock.generate(
+    request([
+      currentUser,
+      { ...assistant(first), sentAt: currentUser.sentAt },
+      user({ messageId: 3 }),
+    ], {
+      model: "gemini-4-carbon",
+      explicitCache: true,
+      state: first.state,
+    }),
+  );
+  assertEquals(mock.calls.length, 2);
+  for (const call of mock.calls) {
+    assert(call.url.endsWith("/models/gemini-4-carbon:generateContent"));
+  }
+  const contents = mock.calls[1]!.body.contents as { parts: { thoughtSignature?: string }[] }[];
+  assertEquals(contents.length, 3);
+  assert(contents[1]!.parts.some((part) => part.thoughtSignature === "AQID"));
+  assertEquals(first.usage.outputTokens, 5);
+});
+
 Deno.test("Argon is appended to model choices and uses medium Interactions despite explicit cache settings", async () => {
   const index = MODEL_OPTIONS.findIndex((option) => option.model === "gemini-4-argon");
   assertEquals(index, 6);

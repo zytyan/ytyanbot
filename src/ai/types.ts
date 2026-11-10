@@ -1,4 +1,5 @@
 export const MODEL_GEMINI_ARGON = "gemini-4-argon";
+export const MODEL_GEMINI_CARBON = "gemini-4-carbon";
 export const MODEL_GEMINI_FLASH = "gemini-3-flash-preview";
 export const MODEL_SONNET_46 = "claude-sonnet-4-6";
 export const MODEL_GEMINI_38_FLASH = "gemini-3.8-flash-high";
@@ -127,6 +128,7 @@ export const MODEL_OPTIONS = Object.freeze([
     label: "Gemini 3.8 Flash（CPA）",
     provider: "cliproxyapi" as const,
   },
+  { model: MODEL_GEMINI_CARBON, label: "Gemini 4 Carbon", provider: "gemini" as const },
 ]);
 
 export function supportsImages(provider: AiProviderName, model: string): boolean {

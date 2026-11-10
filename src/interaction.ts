@@ -70,8 +70,8 @@ export function interaction(db: MainDatabase, ctx: Context) {
 export type Interaction = ReturnType<typeof interaction>;
 
 export function isAiTrigger(text: string, username: string, repliedToBot: boolean): boolean {
-  // Match Go IsGeminiReq, including its UTF-8 length and substring rules.
-  if (text.startsWith("/") || new TextEncoder().encode(text).length > 1000) return false;
+  // Exclude commands; explicit mentions and bot replies trigger regardless of text length.
+  if (text.startsWith("/")) return false;
   return text.includes("@new") || text.includes(`@${username}`) || repliedToBot;
 }
 

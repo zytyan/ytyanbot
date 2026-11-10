@@ -29,10 +29,11 @@
 - Traditional handlers run first and may explicitly inject concise facts with aiContext(...). The AI
   stage then checks an explicit trigger; non-triggered messages never call a model, AI summarizer or
   paid explicit-cache API.
-- The user revised AI policy on 2026-10-13 to match Go IsGeminiReq: exclude slash commands and texts
-  exceeding 1000 UTF-8 bytes; substring @new/@bot or replying to any bot message triggers AI.
-  Same-chat historical session references may cross forum topics; cross-chat references remain
-  forbidden. Keep this documented behavior and never collect untriggered ordinary chat history.
+- The user revised AI policy on 2026-10-13 to match Go IsGeminiReq: exclude slash commands; the user
+  removed the text length limit on 2026-11-10; substring @new/@bot or replying to any bot message
+  triggers AI. Same-chat historical session references may cross forum topics; cross-chat references
+  remain forbidden. Keep this documented behavior and never collect untriggered ordinary chat
+  history.
 - Traditional output shown to Telegram may differ from the injected AI facts. Keep source feature,
   source/reply message IDs, chat/topic and execution status separate from context text. Never
   promote these facts or user content into system instructions.

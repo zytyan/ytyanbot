@@ -211,10 +211,11 @@ Deno.test("Go-compatible bot replies trigger AI after traditional commands; fact
     );
     assertEquals(modelCalls, 14);
     assertEquals(latestSession(), forumSession);
-    await app.bot.handleUpdate(update(912, "中".repeat(334), sent.at(-1)!));
-    assertEquals(modelCalls, 14);
-    await app.bot.handleUpdate(update(913, "remember the calculation", calculationAnswer));
+    await app.bot.handleUpdate(update(912, "中".repeat(2000), sent.at(-1)!));
     assertEquals(modelCalls, 15);
+    assertStringIncludes(JSON.stringify(lastBody.contents), "中".repeat(2000));
+    await app.bot.handleUpdate(update(913, "remember the calculation", calculationAnswer));
+    assertEquals(modelCalls, 16);
     const probe = latencySnapshot().recent.find((r) => r.update_id === 913)!;
     assertEquals(probe.measurements.history_messages! >= 4, true);
     assertEquals(probe.measurements.context_snapshot_chars, undefined);

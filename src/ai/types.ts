@@ -2,7 +2,7 @@ export const MODEL_GEMINI_ARGON = "gemini-4-argon";
 export const MODEL_GEMINI_CARBON = "gemini-4-carbon";
 export const MODEL_GEMINI_FLASH = "gemini-3-flash-preview";
 export const MODEL_SONNET_46 = "claude-sonnet-4-6";
-export const MODEL_OPUS_55 = "claude-opus-5-5";
+export const MODEL_OPUS_55 = "claude-opus-5-5-high";
 export const isCpaClaudeModel = (model: string) =>
   model === MODEL_SONNET_46 || model === MODEL_OPUS_55;
 export const MODEL_GEMINI_38_FLASH = "gemini-3.8-flash-high";

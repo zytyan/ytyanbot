@@ -209,7 +209,7 @@ Deno.test("CLIProxyAPI Gemini uses native route and cannot leak official credent
   assertEquals(mock.calls.length, 2);
 });
 
-for (const claudeModel of ["claude-sonnet-4-6", "claude-opus-5-5"]) {
+for (const claudeModel of ["claude-sonnet-4-6", "claude-opus-5-5-high"]) {
   Deno.test(`CPA ${claudeModel} uses Claude Messages with isolated state, images, signed replay and usage`, async () => {
     const wire = {
       id: "msg-cpa",
@@ -610,7 +610,7 @@ Deno.test("Cancellation during provider call aborts the request without a retry"
 });
 
 Deno.test("Model callbacks distinguish equal model names and stay below Telegram's byte limit", () => {
-  assertEquals(parseModelCallback("aimodel3:9:11")?.option.model, "claude-opus-5-5");
+  assertEquals(parseModelCallback("aimodel3:9:11")?.option.model, "claude-opus-5-5-high");
   MODEL_OPTIONS.forEach((option, index) => {
     const data = `aimodel3:9007199254740991:${index}`;
     assert(encoder.encode(data).length <= 64);
@@ -628,7 +628,7 @@ Deno.test("Model callbacks distinguish equal model names and stay below Telegram
     [
       ["claude-sonnet-4-6", "Claude Sonnet 4.6（CPA）"],
       ["gemini-3.8-flash-high", "Gemini 3.8 Flash（CPA）"],
-      ["claude-opus-5-5", "Claude Opus 5.5（CPA）"],
+      ["claude-opus-5-5-high", "Claude Opus 5.5（CPA）"],
     ],
   );
   [

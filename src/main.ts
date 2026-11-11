@@ -71,7 +71,7 @@ async function serve(): Promise<void> {
   const configs = new ConfigStore(initial, path);
   const checked = new MainDatabase(initial.databasePath, { readOnly: true });
   try {
-    checked.validate();
+    checked.validateSchema();
   } finally {
     checked.close();
   }
@@ -81,7 +81,6 @@ async function serve(): Promise<void> {
   Deno.addSignalListener("SIGINT", stop);
   Deno.addSignalListener("SIGTERM", stop);
   try {
-    db.validate();
     const app = await createApplication(db, configs);
     const watcher = configs.watch(
       abort.signal,

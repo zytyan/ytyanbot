@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { MainDatabase } from "../../src/db/database.ts";
 import { CANONICAL_SCHEMA, MIGRATIONS, REQUIRED_TABLES } from "../../src/db/schema.ts";
 import { temporaryDatabase } from "./helpers.ts";
@@ -156,6 +156,44 @@ Deno.test("database probes distinguish inline SQL and transaction phases without
     assertEquals(Object.keys(trace.stages).some((n) => n.startsWith("db.commit.")), true);
     assertEquals(JSON.stringify(trace).includes("secret"), false);
     assertEquals(JSON.stringify(trace).includes("SELECT"), false);
+  } finally {
+    await temp.close();
+  }
+});
+
+Deno.test("startup schema checks reject incompatible migrations and missing objects", async () => {
+  const temp = await temporaryDatabase();
+  try {
+    temp.db.validateSchema();
+    temp.db.run("UPDATE ts_schema_versions SET checksum='bad' WHERE version=1");
+    assertThrows(() => temp.db.validateSchema(), Error, "checksum mismatch");
+    temp.db.run(
+      "UPDATE ts_schema_versions SET checksum=? WHERE version=1",
+      MIGRATIONS[0]!.checksum,
+    );
+    temp.db.raw.exec("CREATE TABLE gemini_memories(id INTEGER)");
+    assertThrows(() => temp.db.validateSchema(), Error, "retired table remains");
+    temp.db.raw.exec("DROP TABLE gemini_memories");
+    temp.db.raw.exec("DROP INDEX idx_ai_runs_request");
+    assertThrows(() => temp.db.validateSchema(), Error, "required index is missing");
+  } finally {
+    await temp.close();
+  }
+});
+
+Deno.test("startup skips data scans while full validation still detects foreign key violations", async () => {
+  const temp = await temporaryDatabase();
+  try {
+    temp.db.raw.exec(`
+      PRAGMA foreign_keys=OFF;
+      CREATE TABLE test_orphan(session_id INTEGER REFERENCES ai_sessions(id));
+      INSERT INTO test_orphan VALUES(999999);
+      PRAGMA foreign_keys=ON;
+    `);
+    temp.db.validateSchema();
+    assertThrows(() => temp.db.validate(), Error, "foreign_key_check returned 1 rows");
+    temp.db.raw.exec("DROP TABLE test_orphan");
+    assertEquals(temp.db.validate().integrity, "ok");
   } finally {
     await temp.close();
   }

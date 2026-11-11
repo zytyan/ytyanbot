@@ -73,3 +73,13 @@ Gemini Interactions 会话优先通过 previous_interaction_id 发送新增消�
 
 回归使用临时数据库和拦截 API，执行 `deno task check`、`deno task test`、`deno task db:verify`。
 实际转换线上数据库与替换服务需要另行明确授权。
+
+## 启动校验（2026-11-10）
+
+检查基线 `cf56b2417591f4c745f5737d5416fe2f79cf10f7`。正常启动先在只读连接上执行一次
+`validateSchema()`：校验迁移版本和 checksum、必要表/索引/触发器，以及退役表不存在，
+通过后才打开写连接。启动不扫描历史数据、不统计媒体行数，也不后台启动完整扫描。
+
+`validate()` 和独立 `db-check` 继续执行 schema 校验、`PRAGMA integrity_check`、
+`PRAGMA foreign_key_check` 和媒体引用计数；导入、初始化及升级等显式检查路径保持完整校验。
+快速启动不代表已检查所有历史数据页或已有外键关系。运行时仍开启外键约束。

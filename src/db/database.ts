@@ -160,7 +160,8 @@ export class MainDatabase {
     });
   }
 
-  validate(): DatabaseCheck {
+  /** Startup compatibility checks only; full data scans remain in validate()/db-check. */
+  validateSchema(): void {
     for (const migration of MIGRATIONS) {
       const row = this.get<{ name: string; checksum: string }>(
         "SELECT name,checksum FROM ts_schema_versions WHERE version=?",
@@ -206,6 +207,10 @@ export class MainDatabase {
       )?.found;
       if (exists) throw new Error(`retired table remains: ${retired}`);
     }
+  }
+
+  validate(): DatabaseCheck {
+    this.validateSchema();
     const integrity =
       this.get<{ integrity_check: string }>("PRAGMA integrity_check")?.integrity_check ?? "unknown";
     if (integrity !== "ok") throw new Error(`integrity_check: ${integrity}`);

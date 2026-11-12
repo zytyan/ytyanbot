@@ -69,10 +69,13 @@ export YTYAN_CONFIG_FILE=/opt/tgbots/ytyanbot/run/test-config.yaml
 `DEEPSEEK_API_KEY` 覆盖。Bot token、Telegram API URL、数据库和媒体路径改变后必须重启；
 白名单、provider key、NSFW 和日志配置可热重载，无效配置保留旧快照。
 
-模型选择同时保存 provider/model；原有官方 Gemini、DeepSeek 选项保留，Sub2API 已移除。 CLIProxyAPI
-仅增加 `Claude Sonnet 4.6（CPA）`（`claude-sonnet-4-6`）和
-`Gemini 3.8 Flash（CPA）`（`gemini-3.8-flash-high`）。配置独立的 `cliproxyapi-key` 和
-`cliproxyapi-base-url`（服务根地址，默认 `http://127.0.0.1:8317`，不含 `/v1` 或 `/v1beta`）； Sonnet
+模型选择同时保存 provider/model；Gemini 3.1 Flash-Lite 和 Sub2API 入口已移除。CLIProxyAPI 提供
+`Claude Sonnet 4.6（CPA）`（`claude-sonnet-4-6`）、
+`Claude Opus 5.5（CPA）`（`claude-opus-5-5-high`）、
+`Gemini 3.8 Flash（CPA）`（`gemini-3.8-flash-high`）、
+`Gemini 4 Hydrogen（CPA）`（`gemini-4-hydrogen`）和
+`Gemini 4 Argon（CPA）`（`gemini-4-argon`）。配置独立的 `cliproxyapi-key` 和
+`cliproxyapi-base-url`（服务根地址，默认 `http://127.0.0.1:8317`，不含 `/v1` 或 `/v1beta`）；Claude
 使用 `/v1/messages`，Gemini 使用 `/v1beta/models/...:generateContent`，不复用官方 Gemini 缓存或
 Interactions。旧模型菜单需要重新使用 `/model` 打开。历史 Sub2API 数据保留，
 旧会话需先切换到可用模型再继续。代理中的模型 ID/别名需与上述 ID 一致。

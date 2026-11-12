@@ -171,43 +171,45 @@ Deno.test("DeepSeek vision receives images while text-only selection does not", 
   assertEquals(mock.calls.length, 2);
 });
 
-Deno.test("CLIProxyAPI Gemini uses native route and cannot leak official credentials/cache/state", async () => {
-  const mock = intercepted(() => json(nativeResponse()));
-  const first = await mock.generate(request([user()], {
-    provider: "cliproxyapi",
-    model: "gemini-3.8-flash-high",
-    explicitCache: true,
-    state: {
-      geminiInteractionId: "official-id",
-      geminiCacheName: "cachedContents/official",
-      geminiCacheExpireTime: 4_000_000_000,
-    },
-  }));
-  assertEquals(
-    mock.calls[0]!.url,
-    "https://cpa.example/v1beta/models/gemini-3.8-flash-high:generateContent",
-  );
-  assertEquals(mock.calls[0]!.headers.get("x-goog-api-key"), "mock-cpa");
-  assert(!JSON.stringify(mock.calls[0]!.body).includes("official"));
-  assertEquals(first.state, {});
-  assertEquals(first.thoughtSignature, "AQID");
-  assertEquals(first.usage, {
-    inputTokens: 11,
-    cachedInputTokens: 4,
-    outputTokens: 5,
-    thinkingTokens: 2,
-  });
-  assertEquals(JSON.parse(decoder.decode(first.raw)), nativeResponse());
-  await mock.generate(
-    request([user(), assistant(first), user({ messageId: 3 })], {
+for (const geminiModel of ["gemini-3.8-flash-high", "gemini-4-hydrogen", "gemini-4-argon"]) {
+  Deno.test(`CLIProxyAPI ${geminiModel} uses native route and cannot leak official credentials/cache/state`, async () => {
+    const mock = intercepted(() => json(nativeResponse()));
+    const first = await mock.generate(request([user()], {
       provider: "cliproxyapi",
-      model: "gemini-3.8-flash-high",
-    }),
-  );
-  const contents = mock.calls[1]!.body.contents as { parts: Record<string, unknown>[] }[];
-  assertEquals(contents[1]!.parts[0]!.thoughtSignature, "AQID");
-  assertEquals(mock.calls.length, 2);
-});
+      model: geminiModel,
+      explicitCache: true,
+      state: {
+        geminiInteractionId: "official-id",
+        geminiCacheName: "cachedContents/official",
+        geminiCacheExpireTime: 4_000_000_000,
+      },
+    }));
+    assertEquals(
+      mock.calls[0]!.url,
+      `https://cpa.example/v1beta/models/${geminiModel}:generateContent`,
+    );
+    assertEquals(mock.calls[0]!.headers.get("x-goog-api-key"), "mock-cpa");
+    assert(!JSON.stringify(mock.calls[0]!.body).includes("official"));
+    assertEquals(first.state, {});
+    assertEquals(first.thoughtSignature, "AQID");
+    assertEquals(first.usage, {
+      inputTokens: 11,
+      cachedInputTokens: 4,
+      outputTokens: 5,
+      thinkingTokens: 2,
+    });
+    assertEquals(JSON.parse(decoder.decode(first.raw)), nativeResponse());
+    await mock.generate(
+      request([user(), assistant(first), user({ messageId: 3 })], {
+        provider: "cliproxyapi",
+        model: geminiModel,
+      }),
+    );
+    const contents = mock.calls[1]!.body.contents as { parts: Record<string, unknown>[] }[];
+    assertEquals(contents[1]!.parts[0]!.thoughtSignature, "AQID");
+    assertEquals(mock.calls.length, 2);
+  });
+}
 
 for (const claudeModel of ["claude-sonnet-4-6", "claude-opus-5-5-high"]) {
   Deno.test(`CPA ${claudeModel} uses Claude Messages with isolated state, images, signed replay and usage`, async () => {
@@ -611,24 +613,39 @@ Deno.test("Cancellation during provider call aborts the request without a retry"
 
 Deno.test("Model callbacks distinguish equal model names and stay below Telegram's byte limit", () => {
   assertEquals(parseModelCallback("aimodel3:9:11")?.option.model, "claude-opus-5-5-high");
+  assertEquals(parseModelCallback("aimodel3:9:12")?.option, {
+    model: "gemini-4-hydrogen",
+    label: "Gemini 4 Hydrogen（CPA）",
+    provider: "cliproxyapi",
+  });
+  assertEquals(parseModelCallback("aimodel3:9:13")?.option, {
+    model: "gemini-4-argon",
+    label: "Gemini 4 Argon（CPA）",
+    provider: "cliproxyapi",
+  });
+  assertEquals(MODEL_OPTIONS[2], undefined);
+  assertEquals(parseModelCallback("aimodel3:9:2"), undefined);
   MODEL_OPTIONS.forEach((option, index) => {
+    if (!option) return;
     const data = `aimodel3:9007199254740991:${index}`;
     assert(encoder.encode(data).length <= 64);
     assertEquals(parseModelCallback(data), { sessionId: Number.MAX_SAFE_INTEGER, option });
   });
   const official = MODEL_OPTIONS.findIndex((m) =>
-    m.model === "gemini-3.7-flash" && m.provider === "gemini"
+    m?.model === "gemini-3.7-flash" && m.provider === "gemini"
   );
   const proxy = MODEL_OPTIONS.findIndex((m) =>
-    m.model === "gemini-3.8-flash-high" && m.provider === "cliproxyapi"
+    m?.model === "gemini-3.8-flash-high" && m.provider === "cliproxyapi"
   );
   assert(official >= 0 && proxy >= 0 && official !== proxy);
   assertEquals(
-    MODEL_OPTIONS.filter((m) => m.provider === "cliproxyapi").map((m) => [m.model, m.label]),
+    MODEL_OPTIONS.filter((m) => m?.provider === "cliproxyapi").map((m) => [m!.model, m!.label]),
     [
       ["claude-sonnet-4-6", "Claude Sonnet 4.6（CPA）"],
       ["gemini-3.8-flash-high", "Gemini 3.8 Flash（CPA）"],
       ["claude-opus-5-5-high", "Claude Opus 5.5（CPA）"],
+      ["gemini-4-hydrogen", "Gemini 4 Hydrogen（CPA）"],
+      ["gemini-4-argon", "Gemini 4 Argon（CPA）"],
     ],
   );
   [
@@ -675,7 +692,7 @@ Deno.test("Carbon menu selects official Gemini and preserves two-turn native rep
 });
 
 Deno.test("Argon is appended to model choices and uses medium Interactions despite explicit cache settings", async () => {
-  const index = MODEL_OPTIONS.findIndex((option) => option.model === "gemini-4-argon");
+  const index = MODEL_OPTIONS.findIndex((option) => option?.model === "gemini-4-argon");
   assertEquals(index, 6);
   assertEquals(parseModelCallback(`aimodel3:9:${index}`)?.option.provider, "gemini");
   const mock = intercepted(() => json(interactionResponse()));

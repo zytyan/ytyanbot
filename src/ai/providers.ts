@@ -11,6 +11,7 @@ import {
   MODEL_GEMINI_38_FLASH,
   MODEL_GEMINI_ARGON,
   MODEL_GEMINI_FLASH,
+  MODEL_GEMINI_HYDROGEN,
 } from "./types.ts";
 import {
   type ApiMode,
@@ -50,7 +51,8 @@ export function createAiGenerator(
     }
     if (
       request.provider === "cliproxyapi" &&
-      !isCpaClaudeModel(request.model) && request.model !== MODEL_GEMINI_38_FLASH
+      !isCpaClaudeModel(request.model) &&
+      ![MODEL_GEMINI_38_FLASH, MODEL_GEMINI_HYDROGEN, MODEL_GEMINI_ARGON].includes(request.model)
     ) {
       throw new Error(`unsupported CLIProxyAPI model: ${request.model}`);
     }

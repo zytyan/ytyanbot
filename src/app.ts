@@ -216,18 +216,19 @@ function modelKeyboard(
   sessionId = 0,
 ): InlineKeyboardMarkup {
   return {
-    inline_keyboard: MODEL_OPTIONS.map((option, index) => ({ option, index })).filter((
-      { option, index },
-    ) =>
-      MODEL_OPTIONS.findIndex((candidate) =>
-        candidate.provider === option.provider && candidate.model === option.model
-      ) === index
-    ).map(({ option, index }) => [{
-      text: `${
-        option.model === current && option.provider === provider ? "✅ " : ""
-      }${option.label}`,
-      callback_data: `aimodel3:${sessionId}:${index}`,
-    }]),
+    inline_keyboard: MODEL_OPTIONS.flatMap((option, index) => option ? [{ option, index }] : [])
+      .filter((
+        { option, index },
+      ) =>
+        MODEL_OPTIONS.findIndex((candidate) =>
+          candidate?.provider === option.provider && candidate.model === option.model
+        ) === index
+      ).map(({ option, index }) => [{
+        text: `${
+          option.model === current && option.provider === provider ? "✅ " : ""
+        }${option.label}`,
+        callback_data: `aimodel3:${sessionId}:${index}`,
+      }]),
   };
 }
 

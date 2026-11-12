@@ -136,6 +136,13 @@ Deno.test("management replies and input errors are private; successful tools rem
         const body = sends[0]!.payload.rich_message as {
           blocks: { type: string; buttons?: { callback_data: string }[] }[];
         };
+        if (command !== "/chat_config") {
+          const callbacks = body.blocks.flatMap((b) => b.buttons ?? []).map((b) => b.callback_data);
+          assertEquals(callbacks.includes("aimodel3:0:2"), false);
+          assertEquals(callbacks.includes("aimodel3:0:12"), true);
+          assertEquals(callbacks.includes("aimodel3:0:13"), true);
+          assertEquals(JSON.stringify(body).includes("Flash-Lite"), false);
+        }
         assertEquals(body.blocks[0]!.type, "paragraph");
         assertEquals(body.blocks.slice(1).every((b) => b.type === "buttons"), true);
         assertEquals(

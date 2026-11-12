@@ -1,3 +1,4 @@
+export const MODEL_GEMINI_HYDROGEN = "gemini-4-hydrogen";
 export const MODEL_GEMINI_ARGON = "gemini-4-argon";
 export const MODEL_GEMINI_CARBON = "gemini-4-carbon";
 export const MODEL_GEMINI_FLASH = "gemini-3-flash-preview";
@@ -7,7 +8,6 @@ export const isCpaClaudeModel = (model: string) =>
   model === MODEL_SONNET_46 || model === MODEL_OPUS_55;
 export const MODEL_GEMINI_38_FLASH = "gemini-3.8-flash-high";
 export const MODEL_GEMINI_37_FLASH = "gemini-3.7-flash";
-export const MODEL_GEMINI_FLASH_LITE = "gemini-3.1-flash-lite";
 export const MODEL_DEEPSEEK_FLASH = "deepseek-flash";
 export const MODEL_DEEPSEEK_PRO = "deepseek-v4-pro";
 export const isRetiredDeepSeekModel = (model: string) =>
@@ -103,11 +103,11 @@ export interface AiSession {
   readonly historyRebuildLossy: boolean;
 }
 
-// aimodel3 callbacks use this stable index; append new options, never reorder this version.
+// aimodel3 callbacks use stable indexes; append new options and leave removed slots undefined.
 export const MODEL_OPTIONS = Object.freeze([
   { model: MODEL_GEMINI_37_FLASH, label: "Gemini 3.7 Flash", provider: "gemini" as const },
   { model: MODEL_GEMINI_FLASH, label: "Gemini 3 Flash Preview", provider: "gemini" as const },
-  { model: MODEL_GEMINI_FLASH_LITE, label: "Gemini 3.1 Flash-Lite", provider: "gemini" as const },
+  undefined, // Retired Gemini 3.1 Flash-Lite; old callbacks must not select another model.
   {
     model: MODEL_DEEPSEEK_FLASH,
     label: "DeepSeek V4.1 Flash（图片/搜索）",
@@ -133,6 +133,12 @@ export const MODEL_OPTIONS = Object.freeze([
   },
   { model: MODEL_GEMINI_CARBON, label: "Gemini 4 Carbon", provider: "gemini" as const },
   { model: MODEL_OPUS_55, label: "Claude Opus 5.5（CPA）", provider: "cliproxyapi" as const },
+  {
+    model: MODEL_GEMINI_HYDROGEN,
+    label: "Gemini 4 Hydrogen（CPA）",
+    provider: "cliproxyapi" as const,
+  },
+  { model: MODEL_GEMINI_ARGON, label: "Gemini 4 Argon（CPA）", provider: "cliproxyapi" as const },
 ]);
 
 export function supportsImages(provider: AiProviderName, model: string): boolean {

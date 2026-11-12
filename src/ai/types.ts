@@ -1,4 +1,5 @@
-export const MODEL_GEMINI_HYDROGEN = "gemini-4-hydrogen";
+export const MODEL_CPA_GEMINI_HYDROGEN = "gemini-4-hydrogen-xhigh";
+export const MODEL_CPA_GEMINI_ARGON = "gemini-4-argon-high";
 export const MODEL_GEMINI_ARGON = "gemini-4-argon";
 export const MODEL_GEMINI_CARBON = "gemini-4-carbon";
 export const MODEL_GEMINI_FLASH = "gemini-3-flash-preview";
@@ -134,11 +135,15 @@ export const MODEL_OPTIONS = Object.freeze([
   { model: MODEL_GEMINI_CARBON, label: "Gemini 4 Carbon", provider: "gemini" as const },
   { model: MODEL_OPUS_55, label: "Claude Opus 5.5（CPA）", provider: "cliproxyapi" as const },
   {
-    model: MODEL_GEMINI_HYDROGEN,
-    label: "Gemini 4 Hydrogen（CPA）",
+    model: MODEL_CPA_GEMINI_HYDROGEN,
+    label: "Gemini 4 Hydrogen XHigh（CPA）",
     provider: "cliproxyapi" as const,
   },
-  { model: MODEL_GEMINI_ARGON, label: "Gemini 4 Argon（CPA）", provider: "cliproxyapi" as const },
+  {
+    model: MODEL_CPA_GEMINI_ARGON,
+    label: "Gemini 4 Argon High（CPA）",
+    provider: "cliproxyapi" as const,
+  },
 ]);
 
 export function supportsImages(provider: AiProviderName, model: string): boolean {

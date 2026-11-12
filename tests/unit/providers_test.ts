@@ -171,7 +171,9 @@ Deno.test("DeepSeek vision receives images while text-only selection does not", 
   assertEquals(mock.calls.length, 2);
 });
 
-for (const geminiModel of ["gemini-3.8-flash-high", "gemini-4-hydrogen", "gemini-4-argon"]) {
+for (
+  const geminiModel of ["gemini-3.8-flash-high", "gemini-4-hydrogen-xhigh", "gemini-4-argon-high"]
+) {
   Deno.test(`CLIProxyAPI ${geminiModel} uses native route and cannot leak official credentials/cache/state`, async () => {
     const mock = intercepted(() => json(nativeResponse()));
     const first = await mock.generate(request([user()], {
@@ -279,6 +281,13 @@ Deno.test("CPA rejects removed and unlisted models before any provider request",
     Error,
     "unsupported AI provider",
   );
+  for (const model of ["gemini-4-hydrogen", "gemini-4-argon"]) {
+    await assertRejects(
+      () => mock.generate(request([user()], { provider: "cliproxyapi", model })),
+      Error,
+      "unsupported CLIProxyAPI model",
+    );
+  }
   assertEquals(mock.calls.length, 0);
 });
 
@@ -614,13 +623,13 @@ Deno.test("Cancellation during provider call aborts the request without a retry"
 Deno.test("Model callbacks distinguish equal model names and stay below Telegram's byte limit", () => {
   assertEquals(parseModelCallback("aimodel3:9:11")?.option.model, "claude-opus-5-5-high");
   assertEquals(parseModelCallback("aimodel3:9:12")?.option, {
-    model: "gemini-4-hydrogen",
-    label: "Gemini 4 Hydrogen（CPA）",
+    model: "gemini-4-hydrogen-xhigh",
+    label: "Gemini 4 Hydrogen XHigh（CPA）",
     provider: "cliproxyapi",
   });
   assertEquals(parseModelCallback("aimodel3:9:13")?.option, {
-    model: "gemini-4-argon",
-    label: "Gemini 4 Argon（CPA）",
+    model: "gemini-4-argon-high",
+    label: "Gemini 4 Argon High（CPA）",
     provider: "cliproxyapi",
   });
   assertEquals(MODEL_OPTIONS[2], undefined);
@@ -644,8 +653,8 @@ Deno.test("Model callbacks distinguish equal model names and stay below Telegram
       ["claude-sonnet-4-6", "Claude Sonnet 4.6（CPA）"],
       ["gemini-3.8-flash-high", "Gemini 3.8 Flash（CPA）"],
       ["claude-opus-5-5-high", "Claude Opus 5.5（CPA）"],
-      ["gemini-4-hydrogen", "Gemini 4 Hydrogen（CPA）"],
-      ["gemini-4-argon", "Gemini 4 Argon（CPA）"],
+      ["gemini-4-hydrogen-xhigh", "Gemini 4 Hydrogen XHigh（CPA）"],
+      ["gemini-4-argon-high", "Gemini 4 Argon High（CPA）"],
     ],
   );
   [

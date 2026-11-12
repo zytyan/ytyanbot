@@ -73,8 +73,8 @@ export YTYAN_CONFIG_FILE=/opt/tgbots/ytyanbot/run/test-config.yaml
 `Claude Sonnet 4.6（CPA）`（`claude-sonnet-4-6`）、
 `Claude Opus 5.5（CPA）`（`claude-opus-5-5-high`）、
 `Gemini 3.8 Flash（CPA）`（`gemini-3.8-flash-high`）、
-`Gemini 4 Hydrogen（CPA）`（`gemini-4-hydrogen`）和
-`Gemini 4 Argon（CPA）`（`gemini-4-argon`）。配置独立的 `cliproxyapi-key` 和
+`Gemini 4 Hydrogen XHigh（CPA）`（`gemini-4-hydrogen-xhigh`）和
+`Gemini 4 Argon High（CPA）`（`gemini-4-argon-high`）。配置独立的 `cliproxyapi-key` 和
 `cliproxyapi-base-url`（服务根地址，默认 `http://127.0.0.1:8317`，不含 `/v1` 或 `/v1beta`）；Claude
 使用 `/v1/messages`，Gemini 使用 `/v1beta/models/...:generateContent`，不复用官方 Gemini 缓存或
 Interactions。旧模型菜单需要重新使用 `/model` 打开。历史 Sub2API 数据保留，

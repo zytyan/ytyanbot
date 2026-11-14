@@ -28,6 +28,7 @@ import { type ConfigField, StatsService } from "./stats/service.ts";
 import { GrammyTelegramGateway } from "./telegram/gateway.ts";
 import { topicId } from "./telegram/topic.ts";
 import { messageMarkdown } from "./telegram/markdown.ts";
+import { richBlocksText, walkRichBlocks } from "./telegram/rich.ts";
 import { registerRoll } from "./features/roll.ts";
 import { type Interaction, interaction, isAiTrigger, type TraditionalFact } from "./interaction.ts";
 import { albumIndex } from "./ai/albums.ts";
@@ -95,7 +96,8 @@ BOT_USERNAME: Bot的username
 CHAT_TYPE: 聊天类型(group, private)`;
 
 function messageText(message?: Message): string {
-  return message?.text ?? message?.caption ?? "";
+  return message?.text ?? message?.caption ??
+    (message?.rich_message ? richBlocksText(message.rich_message.blocks) : "");
 }
 
 function commandArgument(message?: Message): string {
@@ -120,6 +122,14 @@ function photoInput(photo: PhotoSize): NsfwPhoto {
 }
 
 function incomingMedia(message: Message): IncomingMedia[] {
+  if (message.rich_message) {
+    return [...walkRichBlocks(message.rich_message.blocks)].flatMap((block) => {
+      if (block.type === "photo" || block.type === "video" || block.type === "animation") {
+        return incomingMedia({ ...message, rich_message: undefined, ...block } as Message);
+      }
+      return [];
+    });
+  }
   const photo = largestPhoto(message);
   if (photo) {
     return [{
@@ -313,7 +323,7 @@ export async function createApplication(
     const message = ctx.message;
     const text = messageText(message);
     const aiTrigger = message && configs.value.aiChats.includes(message.chat.id) &&
-      isAiTrigger(text, identity.username, message.reply_to_message?.from?.id === identity.id);
+      isAiTrigger(text, identity.username, message.reply_to_message?.from?.is_bot === true);
     // AI feedback starts before automatic-feature classification or its configuration lookup.
     if (aiTrigger) {
       return await traceUpdate(ctx.update.update_id, "ai", message.date, next);
@@ -353,7 +363,7 @@ export async function createApplication(
       !isAiTrigger(
         messageText(message),
         identity.username,
-        message.reply_to_message?.from?.id === identity.id,
+        message.reply_to_message?.from?.is_bot === true,
       ) ||
       repository.runForRequest(message.chat.id, message.message_id)?.status === "delivered" ||
       ai.isRequestSuspended(toIncoming(message))
@@ -411,7 +421,7 @@ export async function createApplication(
       }
     }
     const replied = message.reply_to_message;
-    const botReply = replied?.from?.id === identity.id;
+    const botReply = replied?.from?.is_bot === true;
     if (!isAiTrigger(messageText(message), identity.username, botReply)) return;
     if (!configs.value.aiChats.includes(message.chat.id)) return;
     const replyFacts = replied

@@ -49,3 +49,55 @@ Deno.test("AI Markdown retains captions, quoted lines and literal fenced code", 
     "`` `x` ``",
   );
 });
+
+Deno.test("received rich blocks preserve nested text, links, tables, captions and code", () => {
+  const rich = message({
+    rich_message: {
+      blocks: [
+        { type: "heading", size: 2, text: "Report" },
+        {
+          type: "paragraph",
+          text: ["🌍 ", {
+            type: "bold",
+            text: ["see ", { type: "url", text: "docs", url: "https://example.com/a(b)" }],
+          }],
+        },
+        {
+          type: "details",
+          summary: "Details",
+          blocks: [
+            {
+              type: "list",
+              items: [{ label: "1.", blocks: [{ type: "paragraph", text: "nested content" }] }],
+            },
+            {
+              type: "table",
+              cells: [[{ text: "key", align: "left", valign: "top" }, {
+                text: "value",
+                align: "left",
+                valign: "top",
+              }]],
+              caption: "table caption",
+            },
+            { type: "pre", language: "python", text: "print(```)" },
+            { type: "photo", photo: [], caption: { text: "photo caption", credit: "Author" } },
+          ],
+        },
+      ],
+    },
+  });
+  const rendered = messageMarkdown(rich);
+  for (
+    const fragment of [
+      "## Report",
+      "**see [docs](https://example.com/a\\(b\\))**",
+      "1. nested content",
+      "key | value",
+      "table caption",
+      "````python\nprint(```)\n````",
+      "photo caption\nAuthor",
+    ]
+  ) {
+    assertStringIncludes(rendered, fragment);
+  }
+});

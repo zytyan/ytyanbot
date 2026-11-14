@@ -242,6 +242,83 @@ Deno.test("Go-compatible bot replies trigger AI after traditional commands; fact
     assertStringIncludes(JSON.stringify(lastBody.contents), "/calc 1/3+1/6 @test_bot");
     assertStringIncludes(JSON.stringify(lastBody.contents), "1/3+1/6 = 0.5");
     assertEquals(JSON.stringify(lastBody.systemInstruction).includes("1/3+1/6"), false);
+    const otherBot = { ...botUser, id: 88, first_name: "other bot", username: "other_bot" };
+    const richReply = {
+      message_id: 2000,
+      date: 1,
+      chat,
+      from: otherBot,
+      rich_message: {
+        blocks: [
+          {
+            type: "paragraph",
+            text: ["other bot report ", {
+              type: "url",
+              text: "source",
+              url: "https://example.com/report",
+            }],
+          },
+          {
+            type: "details",
+            summary: "Evidence",
+            blocks: [
+              {
+                type: "photo",
+                photo: [{
+                  file_id: "photo-2000",
+                  file_unique_id: "uid-2000",
+                  width: 400,
+                  height: 400,
+                }],
+                caption: { text: "rich photo caption" },
+              },
+            ],
+          },
+        ],
+      },
+    } as Message;
+    nextId = 2001;
+    await app.bot.handleUpdate(update(914, "explain the report", richReply));
+    assertEquals(modelCalls, 17);
+    assertEquals(fileDownloads, 4);
+    assertStringIncludes(JSON.stringify(lastBody.contents), "other bot report");
+    assertStringIncludes(JSON.stringify(lastBody.contents), "https://example.com/report");
+    assertStringIncludes(JSON.stringify(lastBody.contents), "rich photo caption");
+    assertEquals(JSON.stringify(lastBody.systemInstruction).includes("other bot report"), false);
+    // Rich input itself must trigger from visible text without a text/caption fallback.
+    await app.bot.handleUpdate(update(915, "", undefined, {
+      text: undefined,
+      from: otherBot,
+      rich_message: {
+        blocks: [{
+          type: "paragraph",
+          text: [
+            { type: "mention", text: "@test_bot", username: "test_bot" },
+            " read this rich input",
+          ],
+        }],
+      },
+    }));
+    assertEquals(modelCalls, 18);
+    assertStringIncludes(JSON.stringify(lastBody.contents), "read this rich input");
+    const ordinaryRich = update(916, "", undefined, {
+      text: undefined,
+      rich_message: { blocks: [{ type: "paragraph", text: "ordinary rich input" }] },
+    });
+    await app.bot.handleUpdate(ordinaryRich);
+    assertEquals(modelCalls, 18);
+    assertEquals(
+      temporary.db.get(
+        "SELECT * FROM ai_messages WHERE msg_id=?",
+        ordinaryRich.message!.message_id,
+      ),
+      undefined,
+    );
+    await app.bot.handleUpdate(update(917, "", richReply, {
+      text: undefined,
+      rich_message: { blocks: [{ type: "paragraph", text: "/unknown @test_bot" }] },
+    }));
+    assertEquals(modelCalls, 18);
     app.flush();
   } finally {
     globalThis.fetch = originalFetch;

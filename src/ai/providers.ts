@@ -8,6 +8,7 @@ import {
   isCpaClaudeModel,
   MODEL_CPA_GEMINI_ARGON,
   MODEL_CPA_GEMINI_HYDROGEN,
+  MODEL_CPA_GEMINI_NEON,
   MODEL_DEEPSEEK_FLASH,
   MODEL_DEEPSEEK_PRO,
   MODEL_GEMINI_38_FLASH,
@@ -53,9 +54,12 @@ export function createAiGenerator(
     if (
       request.provider === "cliproxyapi" &&
       !isCpaClaudeModel(request.model) &&
-      ![MODEL_GEMINI_38_FLASH, MODEL_CPA_GEMINI_HYDROGEN, MODEL_CPA_GEMINI_ARGON].includes(
-        request.model,
-      )
+      ![
+        MODEL_GEMINI_38_FLASH,
+        MODEL_CPA_GEMINI_HYDROGEN,
+        MODEL_CPA_GEMINI_ARGON,
+        MODEL_CPA_GEMINI_NEON,
+      ].includes(request.model)
     ) {
       throw new Error(`unsupported CLIProxyAPI model: ${request.model}`);
     }

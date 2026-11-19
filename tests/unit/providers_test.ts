@@ -172,7 +172,12 @@ Deno.test("DeepSeek vision receives images while text-only selection does not", 
 });
 
 for (
-  const geminiModel of ["gemini-3.8-flash-high", "gemini-4-hydrogen-xhigh", "gemini-4-argon-high"]
+  const geminiModel of [
+    "gemini-3.8-flash-high",
+    "gemini-4-hydrogen-xhigh",
+    "gemini-4-argon-high",
+    "gemini-4-neon-xhigh",
+  ]
 ) {
   Deno.test(`CLIProxyAPI ${geminiModel} uses native route and cannot leak official credentials/cache/state`, async () => {
     const mock = intercepted(() => json(nativeResponse()));
@@ -632,6 +637,11 @@ Deno.test("Model callbacks distinguish equal model names and stay below Telegram
     label: "Gemini 4 Argon High（CPA）",
     provider: "cliproxyapi",
   });
+  assertEquals(parseModelCallback("aimodel3:9:14")?.option, {
+    model: "gemini-4-neon-xhigh",
+    label: "Gemini 4 Neon XHigh（CPA）",
+    provider: "cliproxyapi",
+  });
   assertEquals(MODEL_OPTIONS[2], undefined);
   assertEquals(parseModelCallback("aimodel3:9:2"), undefined);
   MODEL_OPTIONS.forEach((option, index) => {
@@ -655,6 +665,7 @@ Deno.test("Model callbacks distinguish equal model names and stay below Telegram
       ["claude-opus-5-5-high", "Claude Opus 5.5（CPA）"],
       ["gemini-4-hydrogen-xhigh", "Gemini 4 Hydrogen XHigh（CPA）"],
       ["gemini-4-argon-high", "Gemini 4 Argon High（CPA）"],
+      ["gemini-4-neon-xhigh", "Gemini 4 Neon XHigh（CPA）"],
     ],
   );
   [

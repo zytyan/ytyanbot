@@ -18,3 +18,10 @@ CPA `/v1/models`，确认上述两个精确 ID 存在，无后缀的 `gemini-4-h
 未调用真实模型生成，列表可见不代表真实生成验收通过。实际部署记录保存在生产 `run/deploy-gemini4-*`。
 
 验证：`deno task check` 通过；`deno task test` 通过（117 个单元测试、65 个集成测试）。
+
+## Gemini 4 Neon（2026-11-19）
+
+检查基线为 TypeScript master 的 `4f010b5f9b3cdada03741d78338dbb365ddce65d`。 菜单追加
+`Gemini 4 Neon XHigh（CPA）`，`aimodel3` 索引为 14。请求沿用 CPA 的 Gemini `generateContent`
+通道和代理别名指定的思考等级。模型 ID `gemini-4-neon-xhigh` 来自
+[CPA 动态模型目录](https://github.com/router-for-me/models/blob/main/models.json)。

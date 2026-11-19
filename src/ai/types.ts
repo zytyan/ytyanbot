@@ -1,5 +1,6 @@
 export const MODEL_CPA_GEMINI_HYDROGEN = "gemini-4-hydrogen-xhigh";
 export const MODEL_CPA_GEMINI_ARGON = "gemini-4-argon-high";
+export const MODEL_CPA_GEMINI_NEON = "gemini-4-neon-xhigh";
 export const MODEL_GEMINI_ARGON = "gemini-4-argon";
 export const MODEL_GEMINI_CARBON = "gemini-4-carbon";
 export const MODEL_GEMINI_FLASH = "gemini-3-flash-preview";
@@ -142,6 +143,11 @@ export const MODEL_OPTIONS = Object.freeze([
   {
     model: MODEL_CPA_GEMINI_ARGON,
     label: "Gemini 4 Argon High（CPA）",
+    provider: "cliproxyapi" as const,
+  },
+  {
+    model: MODEL_CPA_GEMINI_NEON,
+    label: "Gemini 4 Neon XHigh（CPA）",
     provider: "cliproxyapi" as const,
   },
 ]);

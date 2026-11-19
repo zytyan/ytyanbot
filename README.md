@@ -75,11 +75,12 @@ export YTYAN_CONFIG_FILE=/opt/tgbots/ytyanbot/run/test-config.yaml
 `Gemini 3.8 Flash（CPA）`（`gemini-3.8-flash-high`）、
 `Gemini 4 Hydrogen XHigh（CPA）`（`gemini-4-hydrogen-xhigh`）、
 `Gemini 4 Argon High（CPA）`（`gemini-4-argon-high`）和
-`Gemini 4 Neon XHigh（CPA）`（`gemini-4-neon-xhigh`）。配置独立的 `cliproxyapi-key` 和
-`cliproxyapi-base-url`（服务根地址，默认 `http://127.0.0.1:8317`，不含 `/v1` 或 `/v1beta`）；Claude
-使用 `/v1/messages`，Gemini 使用 `/v1beta/models/...:generateContent`，不复用官方 Gemini 缓存或
-Interactions。旧模型菜单需要重新使用 `/model` 打开。历史 Sub2API 数据保留，
-旧会话需先切换到可用模型再继续。代理中的模型 ID/别名需与上述 ID 一致。
+`Gemini 4 Neon Medium（CPA）`（`gemini-4-neon-xhigh`，显式发送 Medium 思考等级）。配置独立的
+`cliproxyapi-key` 和 `cliproxyapi-base-url`（服务根地址，默认 `http://127.0.0.1:8317`，不含 `/v1` 或
+`/v1beta`）；Claude 使用 `/v1/messages`，Gemini 使用
+`/v1beta/models/...:generateContent`，不复用官方 Gemini 缓存或 Interactions。旧模型菜单需要重新使用
+`/model` 打开。历史 Sub2API 数据保留， 旧会话需先切换到可用模型再继续。代理中的模型 ID/别名需与上述
+ID 一致。
 
 `gemini-explicit-cache: true` 的新官方会话使用原生生成；稳定上下文至少 4096 tokens、
 最近稳定消息至少五分钟前时才尝试创建 900 秒缓存。复用检查内容/提示词/模型/tools 指纹；

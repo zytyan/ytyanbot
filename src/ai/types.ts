@@ -147,7 +147,7 @@ export const MODEL_OPTIONS = Object.freeze([
   },
   {
     model: MODEL_CPA_GEMINI_NEON,
-    label: "Gemini 4 Neon XHigh（CPA）",
+    label: "Gemini 4 Neon Medium（CPA）",
     provider: "cliproxyapi" as const,
   },
 ]);

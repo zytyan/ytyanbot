@@ -25,3 +25,8 @@ CPA `/v1/models`，确认上述两个精确 ID 存在，无后缀的 `gemini-4-h
 `Gemini 4 Neon XHigh（CPA）`，`aimodel3` 索引为 14。请求沿用 CPA 的 Gemini `generateContent`
 通道和代理别名指定的思考等级。模型 ID `gemini-4-neon-xhigh` 来自
 [CPA 动态模型目录](https://github.com/router-for-me/models/blob/main/models.json)。
+
+Medium 调整基线为 `4f954db5349707412661a3a4f5a84521f58fe1e0`。菜单改为
+`Gemini 4 Neon Medium（CPA）`，沿用原路由 ID 和菜单索引，请求显式发送
+`generationConfig.thinkingConfig.thinkingLevel: "medium"`。已经选中的聊天默认项和历史会话在下一次生成时直接采用
+Medium。

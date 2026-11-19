@@ -210,7 +210,9 @@ export function createAiGenerator(
                 cachedContent: state.geminiCacheName,
                 thinkingConfig: {
                   includeThoughts: true,
-                  ...(request.model === MODEL_GEMINI_ARGON
+                  ...(request.model === MODEL_GEMINI_ARGON ||
+                      (request.provider === "cliproxyapi" &&
+                        request.model === MODEL_CPA_GEMINI_NEON)
                     ? { thinkingLevel: "medium" }
                     : request.model === MODEL_GEMINI_FLASH
                     ? { thinkingLevel: "low" }

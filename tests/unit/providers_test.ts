@@ -196,6 +196,13 @@ for (
       `https://cpa.example/v1beta/models/${geminiModel}:generateContent`,
     );
     assertEquals(mock.calls[0]!.headers.get("x-goog-api-key"), "mock-cpa");
+    const thinkingConfig = (mock.calls[0]!.body.generationConfig as {
+      thinkingConfig: Record<string, unknown>;
+    }).thinkingConfig;
+    assertEquals(
+      thinkingConfig.thinkingLevel,
+      geminiModel === "gemini-4-neon-xhigh" ? "medium" : undefined,
+    );
     assert(!JSON.stringify(mock.calls[0]!.body).includes("official"));
     assertEquals(first.state, {});
     assertEquals(first.thoughtSignature, "AQID");
@@ -639,7 +646,7 @@ Deno.test("Model callbacks distinguish equal model names and stay below Telegram
   });
   assertEquals(parseModelCallback("aimodel3:9:14")?.option, {
     model: "gemini-4-neon-xhigh",
-    label: "Gemini 4 Neon XHigh（CPA）",
+    label: "Gemini 4 Neon Medium（CPA）",
     provider: "cliproxyapi",
   });
   assertEquals(MODEL_OPTIONS[2], undefined);
@@ -665,7 +672,7 @@ Deno.test("Model callbacks distinguish equal model names and stay below Telegram
       ["claude-opus-5-5-high", "Claude Opus 5.5（CPA）"],
       ["gemini-4-hydrogen-xhigh", "Gemini 4 Hydrogen XHigh（CPA）"],
       ["gemini-4-argon-high", "Gemini 4 Argon High（CPA）"],
-      ["gemini-4-neon-xhigh", "Gemini 4 Neon XHigh（CPA）"],
+      ["gemini-4-neon-xhigh", "Gemini 4 Neon Medium（CPA）"],
     ],
   );
   [

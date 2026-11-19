@@ -14,3 +14,10 @@
 
 离线回归覆盖其他 bot 的富消息回复、隐藏链接、嵌套媒体、富消息 @bot、
 未触发富消息不留存及斜杠命令排除；使用拦截 API 和临时数据库。
+
+## Telegram 随机动画
+
+检查基线为 TypeScript master 的 `64ba10cc8351d67f0aba5c0c1d5a11e856fb842d`。 显式触发 AI
+时，当前消息及被回复消息中的 [Telegram Dice](https://core.telegram.org/bots/api#dice)
+会转换为玩法说明和服务端实际结果。支持骰子、足球、篮球、飞镖、保龄球和老虎机；普通文本 emoji
+照原文传递。单独发送随机动画遵循现有触发规则。

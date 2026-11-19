@@ -1,5 +1,6 @@
 import type { Message, MessageEntity } from "grammy/types";
 
+import { diceText } from "./dice.ts";
 import { richBlocksText } from "./rich.ts";
 
 interface Span {
@@ -31,6 +32,7 @@ const fence = (text: string, minimum: number) =>
 /** Telegram entity offsets are UTF-16, matching JavaScript's slice indexes. */
 export function messageMarkdown(message: Message): string {
   if (message.rich_message) return richBlocksText(message.rich_message.blocks, true);
+  if (message.dice) return diceText(message.dice);
   const text = message.text ?? message.caption ?? "";
   const entities = message.text !== undefined ? message.entities : message.caption_entities;
   const roots: Span[] = [], stack: Span[] = [];

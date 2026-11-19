@@ -50,6 +50,26 @@ Deno.test("AI Markdown retains captions, quoted lines and literal fenced code", 
   );
 });
 
+Deno.test("Telegram dice context describes the game and the server-provided result", () => {
+  for (
+    const [emoji, value, description] of [
+      ["🎲", 3, "🎲 掷骰子，结果：3 点"],
+      ["⚽", 4, "⚽ 足球射门，结果：进球（Telegram 数值 4）"],
+      ["⚽", 3, "⚽ 足球射门，结果：未进球（Telegram 数值 3）"],
+      ["🏀", 5, "🏀 篮球投篮，结果：投进（Telegram 数值 5）"],
+      ["🏀", 2, "🏀 篮球投篮，结果：未投进（Telegram 数值 2）"],
+      ["🎯", 6, "🎯 投飞镖，结果：命中靶心（Telegram 数值 6）"],
+      ["🎳", 6, "🎳 保龄球，结果：全中（Telegram 数值 6）"],
+      ["🎰", 58, "🎰 转动老虎机，结果：葡萄 · 柠檬 · 7"],
+      ["🎰", 64, "🎰 转动老虎机，结果：7 · 7 · 7（头奖）"],
+      ["🆕", 42, "🆕 Telegram 随机动画，结果数值：42"],
+    ] as const
+  ) {
+    assertEquals(messageMarkdown(message({ dice: { emoji, value } })), description);
+  }
+  assertEquals(messageMarkdown(message({ text: "⚽" })), "⚽");
+});
+
 Deno.test("received rich blocks preserve nested text, links, tables, captions and code", () => {
   const rich = message({
     rich_message: {

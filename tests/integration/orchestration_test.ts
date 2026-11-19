@@ -319,6 +319,37 @@ Deno.test("Go-compatible bot replies trigger AI after traditional commands; fact
       rich_message: { blocks: [{ type: "paragraph", text: "/unknown @test_bot" }] },
     }));
     assertEquals(modelCalls, 18);
+
+    const football = update(918, "", undefined, {
+      text: undefined,
+      dice: { emoji: "⚽", value: 4 },
+    });
+    const sentBeforeDice = sent.length;
+    await app.bot.handleUpdate(football);
+    assertEquals(modelCalls, 18);
+    assertEquals(sent.length, sentBeforeDice);
+    assertEquals(
+      temporary.db.get(
+        "SELECT * FROM ai_messages WHERE msg_id=?",
+        football.message!.message_id,
+      ),
+      undefined,
+    );
+    await app.bot.handleUpdate(update(919, "@test_bot 这球进了吗？", football.message));
+    assertEquals(modelCalls, 19);
+    const footballResult = "⚽ 足球射门，结果：进球（Telegram 数值 4）";
+    assertStringIncludes(JSON.stringify(lastBody.contents), footballResult);
+    assertEquals(JSON.stringify(lastBody.systemInstruction).includes(footballResult), false);
+
+    await app.bot.handleUpdate(update(920, "", sent.at(-1), {
+      text: undefined,
+      dice: { emoji: "🏀", value: 2 },
+    }));
+    assertEquals(modelCalls, 20);
+    assertStringIncludes(
+      JSON.stringify(lastBody.contents),
+      "🏀 篮球投篮，结果：未投进（Telegram 数值 2）",
+    );
     app.flush();
   } finally {
     globalThis.fetch = originalFetch;

@@ -1,5 +1,10 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
-import { calculate, formatCalculation, isCalculation } from "../../src/features/calculator.ts";
+import {
+  calculate,
+  evaluateCalculation,
+  formatCalculation,
+  isCalculation,
+} from "../../src/features/calculator.ts";
 import {
   exchange,
   formatExchangeUpdate,
@@ -36,6 +41,37 @@ Deno.test("calculator preserves rational precedence, Go operators and small numb
     const value of ["1/0", "(-1)^0.5", "3000!", "2^100000", "(".repeat(150) + "1", "Deno.exit()"]
   ) {
     assertThrows(() => calculate(value));
+  }
+});
+
+Deno.test("calculator samples each die independently with inclusive bounds", () => {
+  const single = evaluateCalculation("1d100", (maximum) => maximum - 1);
+  assertEquals(single.dice, [{ sides: 100n, rolls: [100] }]);
+  assertEquals(formatCalculation(single.value), "100");
+
+  const offsets = [0, 99, 2];
+  const maxima: number[] = [];
+  const mixed = evaluateCalculation("2 * 2D100 + 1d6", (maximum) => {
+    maxima.push(maximum);
+    return offsets.shift()!;
+  });
+  assertEquals(maxima, [100, 100, 6]);
+  assertEquals(mixed.dice, [{ sides: 100n, rolls: [1, 100] }, { sides: 6n, rolls: [3] }]);
+  assertEquals(formatCalculation(mixed.value), "205");
+  assertEquals(isCalculation("2D100"), true);
+  assertEquals(isCalculation("100 AED"), false);
+  for (
+    const expression of [
+      "0d100",
+      "1d0",
+      "1.5d6",
+      "2d6.5",
+      "101d6",
+      "100d1+1d1",
+      "1d281474976710656",
+    ]
+  ) {
+    assertThrows(() => evaluateCalculation(expression));
   }
 });
 

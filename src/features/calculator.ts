@@ -1,6 +1,9 @@
+import { randomInt } from "node:crypto";
 import Fraction from "fraction.js";
 
 const bits = 10000;
+const maxDice = 100;
+const maxDiceSides = 2n ** 48n - 1n;
 function checked(value: Fraction): Fraction {
   if (value.n.toString(2).length > bits || value.d.toString(2).length > bits) {
     throw new Error("计算结果过大");
@@ -80,6 +83,7 @@ const precedence: Record<string, number> = {
   p: 5,
   a: 5,
   c: 5,
+  d: 6,
 };
 
 export function normalizeExpression(text: string): string {
@@ -88,20 +92,31 @@ export function normalizeExpression(text: string): string {
 }
 export function isCalculation(text: string): boolean {
   const value = normalizeExpression(text);
-  return value.length <= 1000 && /[+\-*/^!%√|pPaAcC]/.test(value) &&
-    /^[\d\s.()+\-*/^!%√|eEpiPIaAcC]+$/.test(value) && !/^\+\d+$/.test(value);
+  return value.length <= 1000 && /[+\-*/^!%√|pacd]/i.test(value) &&
+    /^[\d\s.()+\-*/^!%√|epiacd]+$/i.test(value) && !/^\+\d+$/.test(value) &&
+    (!/d/i.test(value) || /[\d)!|%]\s*d\s*[\d(]/i.test(value));
 }
+
 export function calculate(text: string): Fraction {
+  return evaluateCalculation(text).value;
+}
+
+export function evaluateCalculation(
+  text: string,
+  sample: (exclusiveMaximum: number) => number = randomInt,
+) {
   const source = normalizeExpression(text);
   if (source.length > 1000) throw new Error("表达式过长");
   const tokens: string[] = [];
   let rest = source.trim();
   while (rest) {
-    const token = rest.match(/^(?:\d+(?:\.\d*)?|\.\d+|pi|e|\*\*|\/\/|[()+\-*/^!%√|pPaAcC])/i)?.[0];
+    const token = rest.match(/^(?:\d+(?:\.\d*)?|\.\d+|pi|e|\*\*|\/\/|[()+\-*/^!%√|pacd])/i)?.[0];
     if (!token) throw new Error("表达式包含无法识别的内容");
     tokens.push(token.toLowerCase());
     rest = rest.slice(token.length).trimStart();
   }
+  const dice: { sides: bigint; rolls: number[] }[] = [];
+  let diceRemaining = maxDice;
   let index = 0, depth = 0;
   const expect = (token: string) => {
     if (tokens[index++] !== token) throw new Error("括号不匹配");
@@ -142,20 +157,29 @@ export function calculate(text: string): Fraction {
       const priority = precedence[operator] ?? -1;
       if (priority <= minimum) break;
       index++;
-      value = checked(
-        binary(
-          operator,
-          value,
-          expression(operator === "^" || operator === "**" ? priority - 1 : priority),
-        ),
+      const right = expression(
+        operator === "^" || operator === "**" ? priority - 1 : priority,
       );
+      if (operator === "d") {
+        const count = integer(value);
+        const sides = integer(right);
+        if (count < 1n || count > BigInt(diceRemaining) || sides < 1n || sides > maxDiceSides) {
+          throw new Error("骰子数量或面数超出范围");
+        }
+        diceRemaining -= Number(count);
+        const rolls = Array.from({ length: Number(count) }, () => sample(Number(sides)) + 1);
+        dice.push({ sides, rolls });
+        value = new Fraction(rolls.reduce((sum, roll) => sum + BigInt(roll), 0n));
+      } else {
+        value = checked(binary(operator, value, right));
+      }
     }
     depth--;
     return checked(value);
   }
   const result = expression();
   if (index !== tokens.length) throw new Error("表达式不完整");
-  return result;
+  return { value: result, dice };
 }
 function fixed(value: Fraction, places: number): string {
   const scale = 10n ** BigInt(places), scaled = value.n * scale;

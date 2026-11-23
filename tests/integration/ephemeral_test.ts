@@ -175,6 +175,27 @@ Deno.test("management replies and input errors are private; successful tools rem
   }
 });
 
+Deno.test("calculator sends die rolls and the total through both Telegram entry points", async () => {
+  const f = await fixture();
+  try {
+    await f.app.bot.handleUpdate(f.callback("gcfg:auto_calculate:F"));
+    for (const [input, expression] of [["/calc 1d1", "1d1"], ["2D1 + 3", "2D1 + 3"]] as const) {
+      const update = f.update(input);
+      const before = f.calls.length;
+      await f.app.bot.handleUpdate(update);
+      const sends = f.calls.slice(before).filter((call) => call.method === "sendMessage");
+      const expected = expression === "1d1"
+        ? "骰子：1d1：1\n1d1 = 1"
+        : "骰子：2d1：1 + 1\n2D1 + 3 = 5";
+      assertEquals(sends.map(({ payload }) => payload.text), [expected]);
+      assertEquals(sends[0]!.payload.reply_parameters, { message_id: update.message!.message_id });
+    }
+  } finally {
+    f.app.flush();
+    await f.close();
+  }
+});
+
 Deno.test("suspend is owner-only, reply-targeted, durable, and always private in groups", async () => {
   const f = await fixture();
   try {

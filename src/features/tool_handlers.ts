@@ -5,7 +5,7 @@ import { SQL } from "../db/queries.ts";
 import type { Interaction } from "../interaction.ts";
 import { BoundedCache, KeyedMutex, Semaphore } from "../shared/concurrency.ts";
 import type { TelegramPort } from "../shared/types.ts";
-import { calculate, formatCalculation, isCalculation } from "./calculator.ts";
+import { evaluateCalculation, formatCalculation, isCalculation } from "./calculator.ts";
 import { fish, isFish, prpr, webpToPng } from "./images.ts";
 import {
   exchange,
@@ -40,9 +40,18 @@ export function toolHandlers(
   const math = async (ctx: Context, force = false) => {
     const expression = text(ctx);
     try {
-      const result = formatCalculation(calculate(expression));
-      await current(ctx).reply(`${expression} = ${result}`);
-      current(ctx).aiContext("calculator", `${expression} = ${result}`);
+      const { value, dice } = evaluateCalculation(expression);
+      const result = `${expression} = ${formatCalculation(value)}`;
+      const rolls = dice.map(({ sides, rolls }) => `${rolls.length}d${sides}：${rolls.join(" + ")}`)
+        .join("；");
+      const reply = rolls ? `骰子：${rolls}\n${result}` : result;
+      if (rolls && reply.length > 4096) {
+        await current(ctx).reply(`骰子：${rolls}`);
+        await current(ctx).reply(result);
+      } else {
+        await current(ctx).reply(reply);
+      }
+      current(ctx).aiContext("calculator", reply);
     } catch {
       if (force) {
         await current(ctx).notice("计算失败，请检查表达式或计算范围。");

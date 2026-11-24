@@ -5,7 +5,7 @@ import { temporaryDatabase } from "./helpers.ts";
 import type { Message, Update } from "grammy/types";
 import { latencySnapshot } from "../../src/shared/latency.ts";
 
-Deno.test("Go-compatible bot replies trigger AI after traditional commands; facts remain user context", async () => {
+Deno.test("Replies to this bot trigger AI after traditional commands; facts remain user context", async () => {
   const temporary = await temporaryDatabase();
   const originalFetch = globalThis.fetch;
   const chat = { id: -100, type: "supergroup", title: "test" } as const;
@@ -278,7 +278,21 @@ Deno.test("Go-compatible bot replies trigger AI after traditional commands; fact
       },
     } as Message;
     nextId = 2001;
-    await app.bot.handleUpdate(update(914, "explain the report", richReply));
+    const otherBotReply = update(921, "explain the report", richReply);
+    const typingBeforeOtherBotReply = typingCalls;
+    await app.bot.handleUpdate(otherBotReply);
+    assertEquals(modelCalls, 16);
+    assertEquals(fileDownloads, 3);
+    assertEquals(typingCalls, typingBeforeOtherBotReply);
+    assertEquals(latencySnapshot().recent.some((t) => t.update_id === 921), false);
+    assertEquals(
+      temporary.db.get(
+        "SELECT * FROM ai_messages WHERE msg_id=?",
+        otherBotReply.message!.message_id,
+      ),
+      undefined,
+    );
+    await app.bot.handleUpdate(update(914, "@test_bot explain the report", richReply));
     assertEquals(modelCalls, 17);
     assertEquals(fileDownloads, 4);
     assertStringIncludes(JSON.stringify(lastBody.contents), "other bot report");

@@ -69,10 +69,10 @@ export function interaction(db: MainDatabase, ctx: Context) {
 }
 export type Interaction = ReturnType<typeof interaction>;
 
-export function isAiTrigger(text: string, username: string, repliedToBot: boolean): boolean {
-  // Exclude commands; explicit mentions and bot replies trigger regardless of text length.
+export function isAiTrigger(text: string, username: string, repliedToThisBot: boolean): boolean {
+  // Exclude commands. Mentions and replies to this bot trigger regardless of text length.
   if (text.startsWith("/")) return false;
-  return text.includes("@new") || text.includes(`@${username}`) || repliedToBot;
+  return text.includes("@new") || text.includes(`@${username}`) || repliedToThisBot;
 }
 
 export function factText(facts: readonly TraditionalFact[]): string {

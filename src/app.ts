@@ -287,6 +287,8 @@ export async function createApplication(
   });
   await bot.init();
   const identity = bot.botInfo;
+  const triggersAi = (message: Message, text = messageText(message)) =>
+    isAiTrigger(text, identity.username, message.reply_to_message?.from?.id === identity.id);
   const telegram = new GrammyTelegramGateway(bot, initial.botToken, initial.telegramApiUrl);
   const repository = new AiRepository(db);
   const stats = new StatsService(db);
@@ -323,7 +325,7 @@ export async function createApplication(
     const message = ctx.message;
     const text = messageText(message);
     const aiTrigger = message && configs.value.aiChats.includes(message.chat.id) &&
-      isAiTrigger(text, identity.username, message.reply_to_message?.from?.is_bot === true);
+      triggersAi(message, text);
     // AI feedback starts before automatic-feature classification or its configuration lookup.
     if (aiTrigger) {
       return await traceUpdate(ctx.update.update_id, "ai", message.date, next);
@@ -360,11 +362,7 @@ export async function createApplication(
     if (
       !message || message.ephemeral_message_id ||
       !configs.value.aiChats.includes(message.chat.id) ||
-      !isAiTrigger(
-        messageText(message),
-        identity.username,
-        message.reply_to_message?.from?.is_bot === true,
-      ) ||
+      !triggersAi(message) ||
       repository.runForRequest(message.chat.id, message.message_id)?.status === "delivered" ||
       ai.isRequestSuspended(toIncoming(message))
     ) {
@@ -421,8 +419,7 @@ export async function createApplication(
       }
     }
     const replied = message.reply_to_message;
-    const botReply = replied?.from?.is_bot === true;
-    if (!isAiTrigger(messageText(message), identity.username, botReply)) return;
+    if (!triggersAi(message)) return;
     if (!configs.value.aiChats.includes(message.chat.id)) return;
     const replyFacts = replied
       ? db.all<TraditionalFact>(

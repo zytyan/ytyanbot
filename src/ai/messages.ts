@@ -41,6 +41,24 @@ export function compactText(message: AiMessage): string {
   return `[ ${message.username} ${timestamp} ]\n${message.text ?? ""}`;
 }
 
+function withoutDeepseekSearch(messages: ModelMessage[]): ModelMessage[] {
+  return messages.flatMap((message): ModelMessage[] => {
+    if (message.role !== "assistant" || !Array.isArray(message.content)) return [message];
+    const content = message.content.filter((part) =>
+      !((part.type === "tool-call" || part.type === "tool-result") &&
+        part.toolName === "web_search")
+    ).map((part) => {
+      // The SDK stores search citations on the text they reference.
+      if (part.type !== "text") return part;
+      const anthropic = part.providerOptions?.anthropic;
+      if (!anthropic?.citations) return part;
+      const { citations: _citations, ...options } = anthropic;
+      return { ...part, providerOptions: { ...part.providerOptions, anthropic: options } };
+    });
+    return content.length ? [{ ...message, content }] : [];
+  });
+}
+
 export function modelMessages(
   messages: readonly AiMessage[],
   provider: AiProviderName,
@@ -60,7 +78,9 @@ export function modelMessages(
         if (
           payload.provider === provider && payload.mode === mode && Array.isArray(payload.messages)
         ) {
-          return payload.messages;
+          return mode === "deepseek-anthropic"
+            ? withoutDeepseekSearch(payload.messages)
+            : payload.messages;
         }
       }
       return [{ role: "assistant", content: message.text ?? "" }];

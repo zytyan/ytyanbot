@@ -20,9 +20,13 @@ ANTHROPIC_BASE_URL，违反单元测试无环境权限；直接实例避免
 
 新响应保存 vercel-ai-messages-v1、provider=deepseek、mode=deepseek-anthropic， 包括 SDK
 response.messages、全部 native content、原始 HTTP 字节及服务器搜索结果。 原 Chat Completions 的
-native/SDK payload 与旧重放路径保留；首次转协议有意以便携
-文字/图片重建，后续同协议精确保留思考、server_tool_use/web_search_tool_result。
+native/SDK payload 与旧重放路径保留；首次转协议有意以便携文字/图片重建。
 用户可见回复附带去重的最多八个 HTTP(S) 来源链接；全部结果仍保留在 payload。
+
+2026-11-26（检查 TS `7a5d86d9ada2d28dfdbc1ed2e5122b62ce095419`）起，Flash 和 Pro
+续聊时发送历史回答正文
+和带签名的思考，移除历史联网搜索的调用、结果（含错误）和结构化搜索引用。筛选发生在请求构建时，
+对已保存的历史同样生效。本轮仍可发起新的搜索。
 
 Messages input_tokens 不含 cache_read/cache_creation，SDK 返回的 inputTokens 已将 它们汇总；取 SDK
 用量，不再叠加。outputTokens 不重复添加 reasoning。搜索请求次数 仍在原始 usage.server_tool_use

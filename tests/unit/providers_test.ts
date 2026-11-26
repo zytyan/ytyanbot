@@ -787,7 +787,17 @@ const nativeDeepseekResponse = () => ({
         },
       ],
     },
-    { type: "text", text: "Latest release", citations: null },
+    {
+      type: "text",
+      text: "Latest release",
+      citations: [{
+        type: "web_search_result_location",
+        url: "https://example.com/release",
+        title: "Release",
+        encrypted_index: "opaque-citation",
+        cited_text: "Release details",
+      }],
+    },
   ],
   stop_reason: "end_turn",
   stop_sequence: null,
@@ -799,7 +809,7 @@ const nativeDeepseekResponse = () => ({
   },
 });
 
-Deno.test("latest DeepSeek native search retains server tools, sources, reasoning and usage across replies", async () => {
+Deno.test("DeepSeek sends answer and reasoning in follow-ups without old search blocks or citations", async () => {
   const mock = intercepted(() => json(nativeDeepseekResponse()));
   const first = await mock.generate(
     request([user()], { provider: "deepseek", model: "deepseek-flash" }),
@@ -823,8 +833,12 @@ Deno.test("latest DeepSeek native search retains server tools, sources, reasonin
       model: "deepseek-flash",
     }),
   );
-  assert(JSON.stringify(mock.calls[1]!.body.messages).includes("signed-reasoning"));
-  assert(JSON.stringify(mock.calls[1]!.body.messages).includes("web_search_tool_result"));
+  assertEquals(mock.calls[1]!.body.tools, tools);
+  const messages = mock.calls[1]!.body.messages as { role: string; content: unknown[] }[];
+  assertEquals(messages.find((message) => message.role === "assistant")?.content, [
+    { type: "thinking", thinking: "reasoning", signature: "signed-reasoning" },
+    { type: "text", text: "Latest release" },
+  ]);
 });
 
 Deno.test("latest DeepSeek imports old Chat history portably and Pro exposes the same native search", async () => {
@@ -922,16 +936,10 @@ for (const code of ["max_uses_exceeded", "too_many_requests", "unavailable"]) {
     assertEquals(mock.calls.length, 2);
     const history = JSON.stringify(mock.calls[1]!.body.messages);
     assert(history.includes("signed-reasoning"));
-    assert(history.includes("opaque"));
-    const blocks = (mock.calls[1]!.body.messages as {
-      content: { type: string; tool_use_id?: string; content?: unknown }[];
-    }[])
-      .flatMap((m) => m.content);
-    assertEquals(
-      blocks.find((b) => b.type === "web_search_tool_result" && b.tool_use_id === "srvtoolu-error")!
-        .content,
-      { type: "web_search_tool_result_error", error_code: code },
-    );
+    assert(history.includes("Latest release"));
+    assert(!history.includes("srvtoolu-"));
+    assert(!history.includes("web_search_tool_result"));
+    assert(!history.includes("opaque"));
   });
 }
 
@@ -961,6 +969,13 @@ Deno.test("DeepSeek search errors without display text still retain successful u
   assertEquals(result.usage.outputTokens, 6);
   assertEquals(JSON.parse(decoder.decode(result.raw)), response);
   assertEquals(mock.calls.length, 1);
+  await mock.generate(request([user(), assistant(result), user({ messageId: 3 })], {
+    provider: "deepseek",
+    model: "deepseek-flash",
+  }));
+  const history = mock.calls[1]!.body.messages as { role: string }[];
+  assert(history.every((message) => message.role === "user"));
+  assert(JSON.stringify(history).includes("你好"));
 });
 
 Deno.test("DeepSeek ambiguous mixed search arrays remain invalid rather than discarding results", async () => {

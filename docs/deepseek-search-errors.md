@@ -17,7 +17,8 @@ web_search_tool_result.content 的单元素数组，而 Anthropic 协议及当�
 
 原始响应字节先捕获，始终按原样作为 raw 保存；native assistant payload 同样来自原响应。 仅传给 SDK
 的响应副本做格式兼容，并去掉已失效的 content-length/content-encoding/transfer-encoding。 SDK
-response messages 保留规范化工具错误、思考签名、成功搜索结果和来源，供下轮原生续聊。
+response messages 保留规范化工具错误、思考签名、成功搜索结果和来源。当前续聊策略见
+[DeepSeek 搜索接入](deepseek-search.md)。
 保持工具错误语义，不伪造成功搜索，不隐藏其他不合法字段，不因搜索达到上限重新生成。 现有
 provider.response.compatibility 探针记录兼容处理耗时，大小指标仍代表原始响应。
 
